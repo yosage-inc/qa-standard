@@ -1,0 +1,289 @@
+# qa.yml — 変更規模を自動判定し、レベルに応じた QA を実行する reusable workflow
+#
+# 各サイトのリポジトリからは薄い caller (templates/ 参照) で呼び出す:
+#   uses: <owner>/qa-standard/.github/workflows/qa.yml@main
+#
+# レベルと実行内容:
+#   L0 コンテンツのみ    → シークレットスキャンのみ (約1分)
+#   L1 軽微なコード変更  → + lint / unit / build
+#   L2 標準リリース      → + E2Eスモーク / リンク切れ / Lighthouse
+#   L3 セキュリティ敏感  → + SAST / 依存脆弱性 / レン承認ゲート
+name: qa
+
+on:
+  workflow_call:
+    inputs:
+      project_type:
+        description: "media | portal (portal は将来 DAST 等が追加される)"
+        required: false
+        default: "media"
+        type: string
+      runtime:
+        description: "node | python"
+        required: false
+        default: "node"
+        type: string
+      build_command:
+        required: false
+        default: "npm run build"
+        type: string
+      build_output_dir:
+        required: false
+        default: "dist"
+        type: string
+      node_version:
+        required: false
+        default: "22"
+        type: string
+      python_version:
+        required: false
+        default: "3.12"
+        type: string
+      smoke_paths:
+        description: "E2E/スモーク対象パス(カンマ区切り)。qa-policy.json の smoke_paths と揃える"
+        required: false
+        default: "/"
+        type: string
+      level_override:
+        description: "手動レベル指定 (L0-L3)。workflow_dispatch から渡す"
+        required: false
+        default: ""
+        type: string
+      qa_standard_ref:
+        required: false
+        default: "main"
+        type: string
+    outputs:
+      level:
+        description: "判定された QA レベル"
+        value: ${{ jobs.classify.outputs.level }}
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------- 1. リリース規模の自動判定 ----------
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      level: ${{ steps.run.outputs.level }}
+      reason: ${{ steps.run.outputs.reason }}
+      run_secrets: ${{ steps.run.outputs.run_secrets }}
+      run_lint: ${{ steps.run.outputs.run_lint }}
+      run_unit: ${{ steps.run.outputs.run_unit }}
+      run_build: ${{ steps.run.outputs.run_build }}
+      run_e2e: ${{ steps.run.outputs.run_e2e }}
+      run_links: ${{ steps.run.outputs.run_links }}
+      run_lighthouse: ${{ steps.run.outputs.run_lighthouse }}
+      run_sast: ${{ steps.run.outputs.run_sast }}
+      run_sca: ${{ steps.run.outputs.run_sca }}
+      needs_approval: ${{ steps.run.outputs.needs_approval }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/qa-standard
+          ref: ${{ inputs.qa_standard_ref }}
+          path: .qa-standard
+      - name: Classify release
+        id: run
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] && [ -n "${{ github.event.before }}" ]; then
+            BASE="${{ github.event.before }}"
+          else
+            BASE=""  # 初回 push 等: classify 側が安全側 (L2) に倒す
+          fi
+          node .qa-standard/scripts/classify-release.mjs \
+            --base "$BASE" --head "${{ github.sha }}" \
+            --override "${{ inputs.level_override }}"
+      - name: Summary
+        run: |
+          {
+            echo "## QA レベル: ${{ steps.run.outputs.level }}"
+            echo "- 判定理由: ${{ steps.run.outputs.reason }}"
+            echo "- 上書きしたい場合: コミットメッセージに \`[qa:L0]\`〜\`[qa:L3]\`、または workflow_dispatch の level_override"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------- 2. シークレットスキャン (全レベル) ----------
+  secrets-scan:
+    needs: classify
+    if: needs.classify.outputs.run_secrets == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # TruffleHog OSS (Apache-2.0): 全履歴から API キー等の混入を検出。
+      # gitleaks は Organization 利用に商用ライセンスが必要になったため不採用 (docs/qa-policy.md 参照)
+      - name: TruffleHog secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --results=verified,unknown
+
+  # ---------- 3. lint / unit / build (L1+) ----------
+  build-test:
+    needs: classify
+    if: needs.classify.outputs.run_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - if: inputs.runtime == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+      - if: inputs.runtime == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+      - name: Install deps
+        run: |
+          if [ "${{ inputs.runtime }}" = "node" ]; then
+            npm ci
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+      - name: Lint (定義されていれば)
+        run: |
+          if [ "${{ inputs.runtime }}" = "node" ] && [ -f package.json ] && jq -e '.scripts.lint' package.json >/dev/null; then
+            npm run lint
+          else
+            echo "lint スクリプト未定義のためスキップ"
+          fi
+      - name: Unit tests (定義されていれば)
+        run: |
+          if [ "${{ inputs.runtime }}" = "node" ] && [ -f package.json ] && jq -e '.scripts.test' package.json >/dev/null; then
+            npm test
+          elif [ "${{ inputs.runtime }}" = "python" ] && ls tests/test_*.py >/dev/null 2>&1; then
+            pip install pytest && pytest -q
+          else
+            echo "テスト未定義のためスキップ"
+          fi
+      - name: Build
+        run: ${{ inputs.build_command }}
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: ${{ inputs.build_output_dir }}
+          retention-days: 3
+
+  # ---------- 4. E2E スモーク + リンク切れ + Lighthouse (L2+) ----------
+  e2e-quality:
+    needs: [classify, build-test]
+    if: needs.classify.outputs.run_e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/qa-standard
+          ref: ${{ inputs.qa_standard_ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: site-dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+      - name: Serve build output
+        run: |
+          npx --yes serve -l 8788 site-dist &
+          for i in $(seq 1 30); do curl -sf http://localhost:8788 >/dev/null && break; sleep 1; done
+      - name: E2E smoke (Playwright)
+        env:
+          SMOKE_BASE_URL: http://localhost:8788
+          SMOKE_PATHS: ${{ inputs.smoke_paths }}
+        run: |
+          npm i --no-save @playwright/test
+          npx playwright install --with-deps chromium
+          npx playwright test --config config/playwright.config.mjs
+      - name: Link check (サイト内リンク切れ)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --include-fragments --root-dir "$(pwd)/site-dist" "site-dist/**/*.html"
+          fail: true
+      - name: Lighthouse CI
+        run: |
+          npm i --no-save @lhci/cli
+          npx lhci autorun \
+            --collect.staticDistDir=site-dist \
+            --config=config/lighthouserc.json || LHCI_EXIT=$?
+          # Lighthouse は L2 では警告扱い (品質劣化の可視化が目的、ブロックは budget 超過のみ)
+          exit ${LHCI_EXIT:-0}
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
+
+  # ---------- 5. セキュリティ深掘り: SAST + 依存脆弱性 (L3) ----------
+  security-deep:
+    needs: classify
+    if: needs.classify.outputs.run_sast == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep SAST (OSS エンジン)
+        run: |
+          pip install semgrep
+          semgrep scan --config auto --error
+      - name: OSV-Scanner (依存脆弱性)
+        uses: google/osv-scanner-action/osv-scanner-action@v2
+        with:
+          scan-args: --recursive ./
+        continue-on-error: false
+      - name: npm audit (high 以上)
+        if: inputs.runtime == 'node'
+        run: |
+          if [ -f package-lock.json ]; then npm audit --audit-level=high; else echo "lockfile なしのためスキップ"; fi
+
+  # ---------- 6. L3 承認ゲート (レンの手動承認) ----------
+  approval:
+    needs: [classify, secrets-scan, build-test, e2e-quality, security-deep]
+    if: needs.classify.outputs.needs_approval == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: qa-l3-approval   # ← リポジトリ設定で required reviewers = レン を設定 (README 参照)
+    steps:
+      - name: Approved
+        run: echo "L3 リリースがレンによって承認されました"
+
+  # ---------- 7. 最終ゲート: デプロイ可否の単一シグナル ----------
+  qa-gate:
+    needs: [classify, secrets-scan, build-test, e2e-quality, security-deep, approval]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate results
+        run: |
+          declare -A results=(
+            [secrets-scan]="${{ needs.secrets-scan.result }}"
+            [build-test]="${{ needs.build-test.result }}"
+            [e2e-quality]="${{ needs.e2e-quality.result }}"
+            [security-deep]="${{ needs.security-deep.result }}"
+            [approval]="${{ needs.approval.result }}"
+          )
+          fail=0
+          for job in "${!results[@]}"; do
+            r="${results[$job]}"
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "❌ $job: $r"; fail=1
+            else
+              echo "✅ $job: $r"
+            fi
+          done
+          # classify 自体の失敗も検出
+          [ "${{ needs.classify.result }}" = "success" ] || { echo "❌ classify: ${{ needs.classify.result }}"; fail=1; }
+          exit $fail

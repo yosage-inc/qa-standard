@@ -1,0 +1,28 @@
+{
+  "$comment": "各サイトのリポジトリ直下に qa-policy.json として置くとデフォルト判定ルールを上書きできる。無ければ classify-release.mjs 内蔵のデフォルトが使われる。ここは上書きしたい項目だけ書けばよい(thresholds はマージされる)。",
+  "version": 1,
+  "l0_paths": [
+    "content/**", "posts/**", "articles/**", "data/**",
+    "public/images/**", "src/content/**",
+    "**/*.md", "**/*.mdx", "**/*.csv",
+    "**/*.jpg", "**/*.jpeg", "**/*.png", "**/*.webp", "**/*.avif", "**/*.gif", "**/*.svg", "**/*.ico",
+    "**/*.txt", "**/*.xml", "README*", "LICENSE*", "docs/**"
+  ],
+  "l2_paths": [
+    "**/layouts/**", "**/templates/**", "**/components/**",
+    "**/*.css", "**/*.scss", "**/tailwind.config.*", "**/astro.config.*", "**/vite.config.*",
+    "build.py", "**/build.py"
+  ],
+  "l3_paths": [
+    "**/auth/**", "**/*auth*", "**/login/**", "**/session*", "**/middleware*",
+    "**/payment*", "**/billing*", "**/checkout*",
+    "**/migrations/**", "**/*.sql", "**/schema*", "**/drizzle*",
+    "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+    "requirements*.txt", "uv.lock",
+    "wrangler.toml", "wrangler.jsonc", "wrangler.json",
+    ".github/**", "**/_headers", "**/headers*", "**/csp*", "**/*cookie*",
+    ".env*", "**/secrets*"
+  ],
+  "thresholds": { "l1_max_files": 5, "l1_max_lines": 150 },
+  "smoke_paths": ["/"]
+}

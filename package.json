@@ -1,0 +1,12 @@
+{
+  "name": "qa-standard",
+  "private": true,
+  "version": "1.0.0",
+  "description": "レンのWeb事業共通QA基盤: リリース規模の自動判定 + レベル別テスト実行 (reusable workflows)",
+  "type": "module",
+  "scripts": {
+    "classify": "node scripts/classify-release.mjs",
+    "check-headers": "node scripts/check-headers.mjs",
+    "smoke": "node scripts/smoke-check.mjs"
+  }
+}

@@ -1,0 +1,20 @@
+# 【テンプレート】週次セキュリティスキャン — .github/workflows/weekly.yml として配置
+# 毎週月曜 09:00 JST (00:00 UTC) に本番サイトを検査し、問題があれば Issue を起票する。
+name: Weekly security scan
+
+on:
+  schedule:
+    - cron: "0 0 * * 1"   # 月曜 00:00 UTC = 09:00 JST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  scan:
+    uses: <OWNER>/qa-standard/.github/workflows/security-weekly.yml@main
+    with:
+      site_url: https://<YOUR-DOMAIN>   # ← 本番ドメインに変更
+      profile: static                    # ポータルは portal (ZAP ベースラインが追加で回る)
+      runtime: node                      # sauna-portal 等 Python サイトは python

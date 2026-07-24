@@ -1,0 +1,107 @@
+# security-weekly.yml — 週次の定期セキュリティ・健全性スキャン (reusable workflow)
+#
+# リリースの有無に関係なく、稼働中の本番サイトを毎週検査する:
+#   - 依存パッケージの既知脆弱性 (リリース後に公開された CVE を拾う)
+#   - 本番 URL のセキュリティヘッダ / 生存確認
+#   - sitemap.xml ベースの全ページリンク切れ
+#   - (portal のみ) OWASP ZAP ベースラインスキャン (DAST)
+# 問題があれば Issue を自動起票する。caller 側で cron を定義して呼び出す。
+name: security-weekly
+
+on:
+  workflow_call:
+    inputs:
+      site_url:
+        required: true
+        type: string
+      profile:
+        description: "static | portal"
+        required: false
+        default: "static"
+        type: string
+      runtime:
+        required: false
+        default: "node"
+        type: string
+      qa_standard_ref:
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  dependency-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: OSV-Scanner (既知脆弱性)
+        uses: google/osv-scanner-action/osv-scanner-action@v2
+        with:
+          scan-args: --recursive ./
+      - name: npm audit
+        if: inputs.runtime == 'node'
+        run: |
+          if [ -f package-lock.json ]; then npm audit --audit-level=high; else echo "lockfile なし"; fi
+
+  production-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/qa-standard
+          ref: ${{ inputs.qa_standard_ref }}
+      - name: Smoke check
+        run: node scripts/smoke-check.mjs --base "${{ inputs.site_url }}" --paths "/"
+      - name: Security headers
+        run: node scripts/check-headers.mjs --url "${{ inputs.site_url }}" --profile "${{ inputs.profile }}"
+      - name: Fetch sitemap URLs
+        id: sitemap
+        run: |
+          curl -sf "${{ inputs.site_url }}/sitemap.xml" \
+            | grep -oE '<loc>[^<]+</loc>' | sed -E 's|</?loc>||g' > sitemap-urls.txt || true
+          echo "count=$(wc -l < sitemap-urls.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          head -3 sitemap-urls.txt || echo "(sitemap なし)"
+      - name: Link check (全公開ページ + 外部リンク)
+        if: steps.sitemap.outputs.count != '0'
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --no-progress --max-concurrency 8 --accept 200..=299,403,429 sitemap-urls.txt
+          fail: true
+
+  zap-baseline:
+    if: inputs.profile == 'portal'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # OWASP ZAP ベースライン: 非侵襲 (パッシブ) スキャン。会員機能ありサイトのみ
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: ${{ inputs.site_url }}
+          allow_issue_writing: true   # ZAP が結果を Issue として自動管理
+
+  notify-failure:
+    needs: [dependency-scan, production-check]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Open issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh issue create \
+            --title "🔒 週次セキュリティスキャンで問題検出: $(date -u +%Y-%m-%d)" \
+            --body "週次スキャンが失敗しました。
+          - サイト: ${{ inputs.site_url }}
+          - 依存脆弱性: ${{ needs.dependency-scan.result }} / 本番チェック: ${{ needs.production-check.result }}
+          - 実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          対応目安: 依存脆弱性(High以上)は1週間以内に更新。ヘッダ/リンク切れは次回リリースで修正。" \
+            --label "security" || true

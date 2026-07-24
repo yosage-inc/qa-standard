@@ -1,0 +1,66 @@
+# post-deploy.yml — デプロイ直後の本番検証 (reusable workflow)
+# 各サイトの deploy ジョブ完了後に呼ぶ。スモーク(主要ページ生存確認) + セキュリティヘッダ検査。
+# 失敗したら Issue を自動起票してジョブを落とす(= レンに通知が飛ぶ)。
+name: post-deploy-check
+
+on:
+  workflow_call:
+    inputs:
+      site_url:
+        description: "本番URL (例: https://example.com)"
+        required: true
+        type: string
+      smoke_paths:
+        description: "スモーク対象パス(カンマ区切り)"
+        required: false
+        default: "/"
+        type: string
+      profile:
+        description: "ヘッダ検査プロファイル: static | portal"
+        required: false
+        default: "static"
+        type: string
+      qa_standard_ref:
+        description: "qa-standard リポジトリの ref"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout qa-standard
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/qa-standard
+          ref: ${{ inputs.qa_standard_ref }}
+
+      - name: Smoke check (本番生存確認)
+        id: smoke
+        run: node scripts/smoke-check.mjs --base "${{ inputs.site_url }}" --paths "${{ inputs.smoke_paths }}"
+
+      - name: Security headers check
+        id: headers
+        run: node scripts/check-headers.mjs --url "${{ inputs.site_url }}" --profile "${{ inputs.profile }}"
+
+      - name: Open issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh issue create \
+            --title "🚨 デプロイ後検証失敗: ${{ inputs.site_url }} ($(date -u +%Y-%m-%d))" \
+            --body "post-deploy チェックが失敗しました。
+          - サイト: ${{ inputs.site_url }}
+          - 失敗ステップ: smoke=${{ steps.smoke.outcome }} / headers=${{ steps.headers.outcome }}
+          - 実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          **直前のデプロイが原因の可能性が高いため、ロールバック(直前コミットの再デプロイ)を検討してください。**" \
+            --label "qa-failure" || echo "Issue起票に失敗(ラベル未作成の可能性)。ログを確認してください。"
