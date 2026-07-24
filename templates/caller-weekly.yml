@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   scan:
-    uses: <OWNER>/qa-standard/.github/workflows/security-weekly.yml@main
+    uses: yosage-inc/qa-standard/.github/workflows/security-weekly.yml@main
     with:
       site_url: https://<YOUR-DOMAIN>   # ← 本番ドメインに変更
       profile: static                    # ポータルは portal (ZAP ベースラインが追加で回る)

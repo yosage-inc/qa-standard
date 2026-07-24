@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   qa:
-    uses: <OWNER>/qa-standard/.github/workflows/qa.yml@main
+    uses: yosage-inc/qa-standard/.github/workflows/qa.yml@main
     with:
       project_type: portal
       runtime: node
@@ -57,7 +57,7 @@ jobs:
 
   post-deploy:
     needs: deploy
-    uses: <OWNER>/qa-standard/.github/workflows/post-deploy.yml@main
+    uses: yosage-inc/qa-standard/.github/workflows/post-deploy.yml@main
     with:
       site_url: https://<YOUR-DOMAIN>       # ← 本番ドメインに変更
       smoke_paths: "/,/login"
