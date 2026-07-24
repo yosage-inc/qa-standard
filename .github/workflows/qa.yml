@@ -210,21 +210,23 @@ jobs:
         with:
           args: --offline --include-fragments --root-dir "$(pwd)/site-dist" "site-dist/**/*.html"
           fail: true
-      - name: Lighthouse CI
+      - name: Lighthouse CI (smoke_paths のページのみ)
         run: |
           npm i --no-save @lhci/cli
-          npx lhci autorun \
-            --collect.staticDistDir=site-dist \
-            --config=config/lighthouserc.json || LHCI_EXIT=$?
-          # Lighthouse は L2 では警告扱い (品質劣化の可視化が目的、ブロックは budget 超過のみ)
-          exit ${LHCI_EXIT:-0}
-      - name: Upload Playwright report
-        if: failure()
+          URLS=""
+          IFS=',' read -ra PATHS <<< "${{ inputs.smoke_paths }}"
+          for p in "${PATHS[@]}"; do URLS="$URLS --collect.url=http://localhost:8788${p}"; done
+          npx lhci autorun $URLS --config=config/lighthouserc.json
+      - name: Upload QA reports (Playwright / Lighthouse)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: playwright-report
+          name: qa-reports
+          path: |
+            playwright-report
+            .lighthouseci/reports
           retention-days: 7
+          if-no-files-found: ignore
 
   # ---------- 5. セキュリティ深掘り: SAST + 依存脆弱性 (L3) ----------
   security-deep:
@@ -258,6 +260,15 @@ jobs:
     steps:
       - name: Approved
         run: echo "L3 リリースがレンによって承認されました"
+      - name: Verify approval gate is configured (設定漏れ検出)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          reviewers=$(gh api "repos/${{ github.repository }}/environments/qa-l3-approval" \
+            --jq '[.protection_rules[]? | select(.type=="required_reviewers")] | length' 2>/dev/null || echo 0)
+          if [ "$reviewers" = "0" ]; then
+            echo "::warning title=L3承認ゲートが素通しです::qa-l3-approval environment に required reviewers が未設定のため、L3リリースが承認なしで通過しています。リポジトリの Settings → Environments → qa-l3-approval で Required reviewers を設定してください。"
+          fi
 
   # ---------- 7. 最終ゲート: デプロイ可否の単一シグナル ----------
   qa-gate:
