@@ -1,6 +1,6 @@
 # 【テンプレート】メディアサイト (Astro / node) 用 — .github/workflows/qa-deploy.yml として配置
 #
-# 使い方: yosage-inc を GitHub Organization 名に置き換え、site_url / smoke_paths を自サイトに合わせる。
+# 使い方: site_url / smoke_paths を自サイトに合わせて変更する (Organization は yosage-inc 設定済み)。
 # 必要な secrets (リポジトリ設定 → Secrets and variables → Actions):
 #   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
 name: QA + Deploy
