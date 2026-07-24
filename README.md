@@ -57,17 +57,24 @@ Actions タブ → workflow_dispatch の `level_override`。
 
 ### 初回のみ(全体で15分)
 - [ ] GitHub Organization を作成し、このディレクトリを `qa-standard` リポジトリとして push
-- [ ] Organization 設定 → Actions → 「Allow all actions and reusable workflows」を確認
-  (private リポジトリ間で reusable workflow を使う場合は qa-standard 側の
-  Settings → Actions → Access を「Accessible from repositories in the organization」に変更)
+- [ ] **qa-standard リポジトリの Settings → Actions → General → Access を
+  「Accessible from repositories in the organization」に変更**
+  (デフォルトは Not accessible。これを忘れると全サイトの QA が起動できない — GitHub 公式仕様)
+- [ ] Organization 設定 → Code security → Dependabot alerts / security updates を全リポジトリで有効化(無料)
+- [ ] GitHub と Cloudflare のアカウントで 2FA を有効化
+  (個人情報保護法の技術的安全管理措置②「アクセス者の識別と認証」に対応)
 
 ### サイトごと(1サイト5分)
 - [ ] リポジトリの Settings → Secrets and variables → Actions に登録:
   - `CLOUDFLARE_API_TOKEN`(Workers デプロイ権限つきトークン)
   - `CLOUDFLARE_ACCOUNT_ID`
+- [ ] `templates/dependabot.yml` を `.github/dependabot.yml` としてコピー(ロビの導入作業に含めてOK)
 - [ ] Settings → Environments → `qa-l3-approval` を作成し、
   **Required reviewers に自分を追加**(これが L3 の承認ゲートになる)
 - [ ] Issues のラベル `qa-failure`(赤)と `security`(黄)を作成(Issue自動起票用)
+- [ ] (PR運用を始める場合) ブランチ保護の required status check には **`qa-gate` だけ**を指定する。
+  qa-gate は QA レベルに関係なく常に実行されるため「スキップされた check が Pending のまま
+  PR をブロックする」という GitHub 公式ドキュメント記載の罠を回避できる
 
 ### 運用中(受動的でOK)
 - [ ] L3 リリース時: GitHub から届く承認依頼メールの「Review deployments」→ Approve

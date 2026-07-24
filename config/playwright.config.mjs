@@ -9,7 +9,7 @@ export default defineConfig({
   testMatch: "e2e-smoke.spec.mjs",
   timeout: 30_000,
   retries: 1, // ネットワーク起因のフレーク対策で1回だけ再試行
-  workers: 2,
+  workers: process.env.CI ? 1 : 2, // CI は workers:1 が安定 (Playwright 公式推奨: playwright.dev/docs/ci)
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
   use: {
     screenshot: "only-on-failure",

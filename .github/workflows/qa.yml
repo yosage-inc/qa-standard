@@ -236,10 +236,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Semgrep SAST (OSS エンジン)
+      # 公式推奨のコンテナ実行 (旧 semgrep-action は 2024-04 に deprecated)。Platform未登録の完全無料運用
+      - name: Semgrep SAST (Community Edition)
         run: |
-          pip install semgrep
-          semgrep scan --config auto --error
+          docker run --rm -v "$PWD:/src" --workdir /src \
+            semgrep/semgrep semgrep scan --config p/default --error --metrics=off
       - name: OSV-Scanner (依存脆弱性)
         uses: google/osv-scanner-action/osv-scanner-action@v2
         with:

@@ -78,9 +78,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      # OWASP ZAP ベースライン: 非侵襲 (パッシブ) スキャン。会員機能ありサイトのみ
+      # OWASP ZAP ベースライン: 非攻撃のパッシブスキャン (公式が本番URL実行を想定内と明記)。
+      # full scan は実攻撃を伴うため本番には絶対に向けないこと (ステージング限定)。
       - name: ZAP baseline scan
-        uses: zaproxy/action-baseline@v0.14.0
+        uses: zaproxy/action-baseline@v0.15.0
         with:
           target: ${{ inputs.site_url }}
           allow_issue_writing: true   # ZAP が結果を Issue として自動管理

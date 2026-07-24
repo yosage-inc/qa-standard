@@ -1,0 +1,24 @@
+# 【テンプレート】Dependabot 設定 — 各サイトの .github/dependabot.yml として配置
+# alerts / security updates は全 GitHub プランで無料。バージョン更新PRは週次・まとめ方式で騒がしくしない。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    groups:
+      # 依存更新PRを1本にまとめる(個人運用でPR洪水を防ぐ)
+      all-dependencies:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo

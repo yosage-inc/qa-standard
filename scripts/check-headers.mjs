@@ -62,13 +62,16 @@ add("X-Powered-By の除去", !h["x-powered-by"], "WARN", h["x-powered-by"] ? `�
 add("Server ヘッダの詳細版数非露出", !/\d/.test(h["server"] || ""), "WARN",
   h["server"] ? `Server: ${h["server"]}` : "OK: 非露出");
 
-// --- ポータルのみ: Cookie 属性 ---
+// --- ポータルのみ: Cookie 属性 (Mozilla HTTP Observatory で最重量の減点項目: HttpOnly欠如-30 / Secure欠如-40) ---
 if (isPortal) {
   const setCookie = res.headers.getSetCookie?.() ?? (h["set-cookie"] ? [h["set-cookie"]] : []);
   if (setCookie.length > 0) {
     const bad = setCookie.filter((c) => !/;\s*secure/i.test(c) || !/;\s*httponly/i.test(c));
     add("Set-Cookie の Secure + HttpOnly", bad.length === 0, "FAIL",
       bad.length ? `不備 ${bad.length} 件: ${bad[0].split(";")[0]}=…` : `OK (${setCookie.length}件)`);
+    const noSameSite = setCookie.filter((c) => !/;\s*samesite=/i.test(c));
+    add("Set-Cookie の SameSite", noSameSite.length === 0, "WARN",
+      noSameSite.length ? `SameSite 未指定 ${noSameSite.length} 件 (Lax 以上を明示推奨)` : "OK");
   }
 }
 
