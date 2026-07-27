@@ -183,6 +183,9 @@ X-Frame-Options: DENY                              # CSP frame-ancestors の後�
   [Mozilla HTTP Observatory の採点実装](https://github.com/mdn/mdn-http-observatory/blob/main/src/grader/charts.js)で
   HttpOnly 欠如 -30 / Secure 欠如 -40 と、単一項目として最も重い減点であるため。
 - 検査: `scripts/check-headers.mjs` がデプロイ直後と週次に自動検査(HSTS は1年以上で PASS、設定値は2年を推奨)。
+  デプロイ直後の検査は、Cloudflare Workers の新バージョンがエッジへ伝播する前の
+  旧レスポンスを検査して誤 FAIL した実績があるため(portal-sauna Issue #3、rerun で全通過)、
+  失敗時に 30 秒間隔で最大 3 回リトライしてから判定する(post-deploy.yml が `--retries 3` を指定)。
   手動確認には [MDN HTTP Observatory](https://developer.mozilla.org/en-US/observatory) を使う
   (旧 Mozilla Observatory は 2024-10 にサンセット済み。目標グレード A 以上)。
 
@@ -233,7 +236,7 @@ X-Frame-Options: DENY                              # CSP frame-ancestors の後�
 | いつ | 何が走る | 人間(レン)の関与 |
 |---|---|---|
 | 毎 push / PR | classify → レベル別 QA → qa-gate | L3 のみ承認クリック |
-| デプロイ直後 | 本番スモーク + ヘッダ検査 | 失敗 Issue が来たら最優先で対応指示 |
+| デプロイ直後 | 本番スモーク + ヘッダ検査(失敗時は30秒×3回リトライ) | 失敗 Issue が来たら最優先で対応指示 |
 | 毎週月曜 09:00 JST | 依存脆弱性 / 本番ヘッダ / 全リンク / (portal) DAST | 起票された Issue の確認 |
 
 - QA が検出した問題の対応順: ①本番障害(post-deploy 失敗) → ②シークレット漏えい →

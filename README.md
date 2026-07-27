@@ -20,7 +20,9 @@ push / PR
    │
    ▼
 [qa-gate] 全ジョブ成功で通過 → [deploy] wrangler deploy → [post-deploy] 本番スモーク+ヘッダ検査
-                                                              └ 失敗時: Issue自動起票(ロールバック提案)
+                                                              ├ 失敗時: 30秒間隔で最大3回リトライ
+                                                              │  (エッジ伝播前の旧レスポンス誤検知を防止)
+                                                              └ それでも失敗: Issue自動起票(ロールバック提案)
 毎週月曜 09:00 JST
    └─ [security-weekly] 依存CVE / 本番ヘッダ / 全ページリンク切れ / (portalのみ)ZAP DAST → 問題あればIssue起票
 ```
@@ -36,8 +38,8 @@ Actions タブ → workflow_dispatch の `level_override`。
 | `.github/workflows/post-deploy.yml` | デプロイ直後の本番検証 (reusable) |
 | `.github/workflows/security-weekly.yml` | 週次セキュリティスキャン (reusable) |
 | `scripts/classify-release.mjs` | QAレベル判定エンジン(依存ゼロ) |
-| `scripts/check-headers.mjs` | セキュリティヘッダ検査(OWASP準拠) |
-| `scripts/smoke-check.mjs` | HTTP生存確認 |
+| `scripts/check-headers.mjs` | セキュリティヘッダ検査(OWASP準拠)。`--retries` でリトライ可 |
+| `scripts/smoke-check.mjs` | HTTP生存確認。`--retries` でリトライ可 |
 | `scripts/e2e-smoke.spec.mjs` | 共通E2Eスモーク(サイト側テストコード不要) |
 | `config/` | Playwright / Lighthouse / ポリシー例 |
 | `templates/` | 各サイトに置く caller のコピー元 |
@@ -92,3 +94,9 @@ node scripts/classify-release.mjs --base origin/main --head HEAD --cwd /path/to/
 node scripts/check-headers.mjs --url https://example.com --profile static
 node scripts/smoke-check.mjs --base https://example.com --paths "/,/about/"
 ```
+
+どちらのスクリプトも `--retries N --retry-wait 秒` で「失敗時に待って再検査」ができる
+(デフォルトはリトライなし)。デプロイ直後の Cloudflare Workers はエッジ伝播前の
+旧レスポンスを返すことがあるため、post-deploy.yml は `--retries 3 --retry-wait 30` で
+呼んでいる(成功時は即通過なので通常のデプロイ時間は延びない)。
+ローカルからデプロイ直後に確認するときも同様に付けるとよい。

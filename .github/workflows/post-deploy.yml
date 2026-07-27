@@ -1,6 +1,10 @@
 # post-deploy.yml — デプロイ直後の本番検証 (reusable workflow)
 # 各サイトの deploy ジョブ完了後に呼ぶ。スモーク(主要ページ生存確認) + セキュリティヘッダ検査。
 # 失敗したら Issue を自動起票してジョブを落とす(= レンに通知が飛ぶ)。
+#
+# デプロイ直後は Cloudflare Workers の新バージョンがエッジに伝播する前の旧レスポンスを
+# 検査して誤 FAIL することがある(portal-sauna Issue #3)。このため各チェックは
+# 失敗時に 30 秒間隔で最大 3 回リトライする(成功時は即通過なので待ち時間なし)。
 name: post-deploy-check
 
 on:
@@ -43,11 +47,11 @@ jobs:
 
       - name: Smoke check (本番生存確認)
         id: smoke
-        run: node scripts/smoke-check.mjs --base "${{ inputs.site_url }}" --paths "${{ inputs.smoke_paths }}"
+        run: node scripts/smoke-check.mjs --base "${{ inputs.site_url }}" --paths "${{ inputs.smoke_paths }}" --retries 3 --retry-wait 30
 
       - name: Security headers check
         id: headers
-        run: node scripts/check-headers.mjs --url "${{ inputs.site_url }}" --profile "${{ inputs.profile }}"
+        run: node scripts/check-headers.mjs --url "${{ inputs.site_url }}" --profile "${{ inputs.profile }}" --retries 3 --retry-wait 30
 
       - name: Open issue on failure
         if: failure()
@@ -62,5 +66,6 @@ jobs:
           - 失敗ステップ: smoke=${{ steps.smoke.outcome }} / headers=${{ steps.headers.outcome }}
           - 実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
+          30秒間隔で最大3回リトライしても失敗しているため、エッジ伝播待ちによる誤検知の可能性は低いです。
           **直前のデプロイが原因の可能性が高いため、ロールバック(直前コミットの再デプロイ)を検討してください。**" \
             --label "qa-failure" || echo "Issue起票に失敗(ラベル未作成の可能性)。ログを確認してください。"
