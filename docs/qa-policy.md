@@ -92,6 +92,17 @@ Google 公式の閾値(75パーセンタイル評価、[web.dev/vitals](https://
 - カテゴリスコアの基準: performance ≧0.8 (warn) / accessibility ≧0.9 (error) /
   SEO ≧0.9 (error、メディア事業の生命線) / best-practices ≧0.9 (warn)。
   これは当事業の運用値(preset `lighthouse:recommended` は静的サイトにノイズが多いため明示指定を採用)。
+- **サードパーティタグ(GA4 等)は本番ドメインの hostname 判定で発火させる**(ビルドモード判定のみは不可):
+  `import.meta.env.PROD` のようなビルド判定だけだと、本番ビルドを検査する CI やプレビュー環境でも
+  タグが発火し、①本番アナリティクスへの計測データ汚染、②Lighthouse ラボ計測(モバイル・CPU 4倍減速)で
+  タグ実行のロングタスクが LCP を押し上げる誤検出、の2つを起こす。
+  実例(2026-08-04, reform-soba): GA4(gtag.js 169KB)導入直後から、実ブラウザ観測値 FCP=LCP≈190ms の
+  ページ群がシミュレーション値 LCP 2495〜2556ms となり、閾値 2500ms をまたいで qa-gate が恒常失敗した
+  ([該当ラン](https://github.com/yosage-inc/reform-soba/actions/runs/30931630638))。
+  hostname 判定にすれば CI は自サイトコードの回帰を安定検知でき、タグ込みの実ユーザー体感は
+  公開後のフィールドデータ(CrUX、上表の75パーセンタイル評価)で監視する。
+  Lighthouse 側で計測から除外する代替案(`blockedUrlPatterns`)は、タグの発火実態と計測条件が
+  ズレる二重管理になるため採らず、発火制御はサイト側に置くことを標準とする。
 
 ### 3-4. E2E スモークテスト
 
