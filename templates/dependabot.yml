@@ -14,6 +14,9 @@ updates:
       all-dependencies:
         patterns: ["*"]
     open-pull-requests-limit: 3
+    # 公開直後のパッケージを避ける(サプライチェーン対策・Semgrep指摘対応)
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: github-actions
     directory: /
@@ -22,3 +25,6 @@ updates:
       day: monday
       time: "09:00"
       timezone: Asia/Tokyo
+    # 公開直後のバージョンを避ける(サプライチェーン対策・Semgrep指摘対応)
+    cooldown:
+      default-days: 7
