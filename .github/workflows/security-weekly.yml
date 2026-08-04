@@ -37,9 +37,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: OSV-Scanner (既知脆弱性)
-        uses: google/osv-scanner-action/osv-scanner-action@v2
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
         with:
           scan-args: --recursive ./
       - name: npm audit
@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ github.repository_owner }}/qa-standard
           ref: ${{ inputs.qa_standard_ref }}
@@ -68,7 +68,7 @@ jobs:
           head -3 sitemap-urls.txt || echo "(sitemap なし)"
       - name: Link check (全公開ページ + 外部リンク)
         if: steps.sitemap.outputs.count != '0'
-        uses: lycheeverse/lychee-action@v2
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           args: --no-progress --max-concurrency 8 --accept 200..=299,403,429 sitemap-urls.txt
           fail: true
@@ -81,7 +81,7 @@ jobs:
       # OWASP ZAP ベースライン: 非攻撃のパッシブスキャン (公式が本番URL実行を想定内と明記)。
       # full scan は実攻撃を伴うため本番には絶対に向けないこと (ステージング限定)。
       - name: ZAP baseline scan
-        uses: zaproxy/action-baseline@v0.15.0
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
         with:
           target: ${{ inputs.site_url }}
           allow_issue_writing: true   # ZAP が結果を Issue として自動管理
