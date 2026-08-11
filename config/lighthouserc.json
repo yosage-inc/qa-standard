@@ -3,7 +3,14 @@
     "collect": {
       "numberOfRuns": 1,
       "settings": {
-        "onlyCategories": ["performance", "accessibility", "seo", "best-practices"]
+        "onlyCategories": ["performance", "accessibility", "seo", "best-practices"],
+        "blockedUrlPatterns": [
+          "*googletagmanager.com*",
+          "*google-analytics.com*",
+          "*analytics.google.com*",
+          "*clarity.ms*",
+          "*doubleclick.net*"
+        ]
       }
     },
     "assert": {
