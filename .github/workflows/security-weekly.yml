@@ -23,6 +23,11 @@ on:
         required: false
         default: "node"
         type: string
+      working_directory:
+        description: "package-lock.json 等があるディレクトリ。サイトがサブディレクトリにあるリポジトリ用 (例: kazoeru = site)"
+        required: false
+        default: "."
+        type: string
       qa_standard_ref:
         required: false
         default: "main"
@@ -44,6 +49,7 @@ jobs:
           scan-args: --recursive ./
       - name: npm audit
         if: inputs.runtime == 'node'
+        working-directory: ${{ inputs.working_directory }}
         run: |
           if [ -f package-lock.json ]; then npm audit --audit-level=high; else echo "lockfile なし"; fi
 
@@ -59,12 +65,23 @@ jobs:
         run: node scripts/smoke-check.mjs --base "${{ inputs.site_url }}" --paths "/"
       - name: Security headers
         run: node scripts/check-headers.mjs --url "${{ inputs.site_url }}" --profile "${{ inputs.profile }}"
-      - name: Fetch sitemap URLs
+      - name: Fetch sitemap URLs (sitemap.xml / sitemap-index.xml 両対応)
         id: sitemap
         run: |
-          curl -sf "${{ inputs.site_url }}/sitemap.xml" \
-            | grep -oE '<loc>[^<]+</loc>' | sed -E 's|</?loc>||g' > sitemap-urls.txt || true
-          echo "count=$(wc -l < sitemap-urls.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          # Astro (@astrojs/sitemap) は /sitemap.xml ではなく /sitemap-index.xml を吐くため両方試す。
+          # sitemapindex だった場合は子サイトマップを1階層展開してページURLを集める
+          # (展開しないと <loc> が子サイトマップのURLになり、全ページのリンク検査が空回りする)。
+          XML="$(curl -sf "${{ inputs.site_url }}/sitemap.xml" || curl -sf "${{ inputs.site_url }}/sitemap-index.xml" || true)"
+          : > sitemap-urls.txt
+          if printf '%s' "$XML" | grep -q '<sitemapindex'; then
+            printf '%s\n' "$XML" | grep -oE '<loc>[^<]+</loc>' | sed -E 's|</?loc>||g' | while read -r child; do
+              curl -sf "$child" | grep -oE '<loc>[^<]+</loc>' | sed -E 's|</?loc>||g' >> sitemap-urls.txt || true
+            done
+          else
+            printf '%s\n' "$XML" | grep -oE '<loc>[^<]+</loc>' | sed -E 's|</?loc>||g' >> sitemap-urls.txt || true
+          fi
+          echo "count=$(grep -c . sitemap-urls.txt || true)" >> "$GITHUB_OUTPUT"
+          echo "収集URL数: $(grep -c . sitemap-urls.txt || true)"
           head -3 sitemap-urls.txt || echo "(sitemap なし)"
       - name: Link check (全公開ページ + 外部リンク)
         if: steps.sitemap.outputs.count != '0'

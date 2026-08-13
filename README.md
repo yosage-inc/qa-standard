@@ -54,6 +54,10 @@ Actions タブ → workflow_dispatch の `level_override`。
 4. `smoke_paths` を主要ページ(トップ+テンプレート種別ごとに1ページ)に設定
 5. 必要なら `qa-policy.json` をリポジトリ直下に置いて判定ルールを調整
    (無くても classify 内蔵デフォルトで動く。`config/qa-policy.example.json` 参照)
+6. サイト本体がリポジトリ直下でなくサブディレクトリにある場合(例: kazoeru は `site/`)は、
+   qa.yml / security-weekly.yml の入力 `working_directory` にそのディレクトリを渡す。
+   あわせて classify のデフォルト判定パターンはルート直下前提のものがある
+   (`package.json` `wrangler.jsonc` 等)ため、`qa-policy.json` でサブディレクトリ分を足すこと
 
 ## 🙋 レンのタスク(人間にしかできない作業)
 
