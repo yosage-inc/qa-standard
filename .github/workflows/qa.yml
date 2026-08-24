@@ -218,14 +218,18 @@ jobs:
       - name: Link check (サイト内リンク切れ)
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
-          # --remap: ルート相対のフラグメントリンク(例: href="/#section")を root-dir で解決すると
-          # ディレクトリURL(…/site-dist#section)になり、lychee は index.html へのフォールバックを
-          # せず「Cannot find fragment」と誤検知する(kazoeru のカテゴリナビで実測、lychee 0.24.2)。
-          # index.html に読み替えて、フラグメント自体は実検査を維持する(存在しないアンカーは
-          # remap後もERRORになることをカナリアで確認済み。除外との違いに注意)。
+          # --remap: ディレクトリURLへのフラグメントリンクを root-dir で解決すると
+          # 「…/site-dist#section」「…/site-dist/subsidy#section」のような拡張子なしURLになり、
+          # lychee は index.html へのフォールバックをせず「Cannot find fragment」と誤検知する
+          # (kazoeru のカテゴリナビ(ルート直下)と reform-soba の /subsidy/#shinsei-nagare
+          # (サブディレクトリ)で実測、lychee 0.24.2)。ドットを含まないパスセグメントの並び
+          # (= ディレクトリURL)に限って index.html に読み替え、フラグメント自体は実検査を維持する。
+          # 「page.html#section」のような実ファイルへのリンクはセグメントにドットを含むため
+          # remapされず、直接検査される。存在しないアンカーは remap後もERRORになることを
+          # カナリアで確認済み(2026-08-24再確認)。除外との違いに注意。
           args: >-
             --offline --include-fragments --root-dir "$(pwd)/site-dist"
-            --remap '(file://.*/site-dist)#(.*) $1/index.html#$2'
+            --remap '(file://.*/site-dist(?:/[^#./]+)*)#(.*) $1/index.html#$2'
             "site-dist/**/*.html"
           fail: true
       - name: Lighthouse CI (smoke_paths のページのみ)
