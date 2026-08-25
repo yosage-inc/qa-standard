@@ -35,6 +35,21 @@ const TRACKING_HOSTS = [
 // サードパーティ起因で自サイトの品質と無関係なエラーはここで除外
 const CONSOLE_ALLOWLIST = [/googletagmanager/i, /google-analytics/i, /analytics\.google/i, /clarity/i, /doubleclick/i, /favicon\.ico.*404/i];
 
+// Chromiumのバージョンによっては console.error の text がURLを含まない
+// ("Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector" 等)。
+// text だけでなく発生元URL (msg.location().url) も突き合わせて判定する。
+function isAllowedConsoleError(msg) {
+  const text = msg.text();
+  const url = msg.location()?.url || "";
+  if (CONSOLE_ALLOWLIST.some((re) => re.test(text) || re.test(url))) return true;
+  // スペック自身が遮断した計測リクエスト起因のエラーは全て許容 (遮断は T-001 対策で意図的)
+  try {
+    const host = new URL(url).hostname;
+    if (TRACKING_HOSTS.some((t) => host === t || host.endsWith(`.${t}`))) return true;
+  } catch {}
+  return false;
+}
+
 for (const path of PATHS) {
   test(`smoke: ${path}`, async ({ page }) => {
     const blockedRequests = [];
@@ -55,8 +70,8 @@ for (const path of PATHS) {
     const consoleErrors = [];
     page.on("pageerror", (e) => pageErrors.push(String(e)));
     page.on("console", (msg) => {
-      if (msg.type() === "error" && !CONSOLE_ALLOWLIST.some((re) => re.test(msg.text()))) {
-        consoleErrors.push(msg.text());
+      if (msg.type() === "error" && !isAllowedConsoleError(msg)) {
+        consoleErrors.push(`${msg.text()} (${msg.location()?.url || "url不明"})`);
       }
     });
 
