@@ -26,7 +26,8 @@ qa-standard リポジトリのワークフローはこの標準を実装した�
 4. **自動チェックの限界を認める**: 自動アクセシビリティチェックが検出できる問題は57%
    (axe-core 開発元 Deque 社の2021年自社調査、第三者検証ではない点に注意
    [Deque Blog](https://www.deque.com/blog/automated-testing-study-identifies-57-percent-of-digital-accessibility-issues/))。
-   CI が緑 = 品質保証完了ではなく、L3 の人間承認と週次監視で補完する。
+   CI が緑 = 品質保証完了ではなく、週次監視とリリース前のレビューで補完する
+   (L3 の人の承認ゲートは GitHub のプランの制約で今は使えない。§2-3)。
 
 ## 2. QAレベル定義(リリースの大きさ・複雑さの自動判定)
 
@@ -38,7 +39,7 @@ qa-standard リポジトリのワークフローはこの標準を実装した�
 | **L0** | コンテンツ・データ・画像のみ。コード不変で影響度が最小 | シークレットスキャンのみ | 約1分 |
 | **L1** | 軽微なコード変更(≦5ファイル かつ ≦150行) | + lint / unit / build | 3〜5分 |
 | **L2** | レイアウト・テンプレート等の全ページ波及、または中規模以上の変更 | + E2Eスモーク / リンク切れ / Lighthouse | 8〜15分 |
-| **L3** | 認証・決済・セッション・DBスキーマ・依存関係・CI設定・ヘッダ(影響度が最大の領域) | + SAST / 依存脆弱性スキャン / **人間の承認** | 15分+承認 |
+| **L3** | 認証・決済・セッション・DBスキーマ・依存関係・CI設定・ヘッダ(影響度が最大の領域) | + SAST / 依存脆弱性スキャン(人の承認ゲートは `l3_approval: true` のときだけ。§2-3) | 10〜15分 |
 
 - L0 でもシークレットスキャンを外さない理由: API キーの誤コミットはコンテンツ更新でも起こる事故で、
   影響度(Impact)が極めて高いため。
@@ -50,7 +51,9 @@ qa-standard リポジトリのワークフローはこの標準を実装した�
   ワークフロー自体をスキップすると **required status check が Pending のまま残り PR をブロックする**
   公式記載の罠がある([GitHub Docs](https://docs.github.com/en/actions/using-workflows/triggering-a-workflow))。
   そのため本基盤は「ワークフローは常に起動し、classify が内部でジョブを間引く」方式を採る。
-  required check には常に実行される `qa-gate` のみを指定すること。
+  (以前は required check 用に常に走る集約ジョブ `qa-gate` を置いていたが、ブランチ保護は GitHub Free の
+  private リポジトリでは使えず、毎回1分かかるだけなので 2026-10-08 に廃止した。§2-3。
+  有料プランで必須チェックを使うときの注意は README「レンのタスク」)
 
 ### 2-1. 判定の基準(何と比べるか)
 
@@ -133,6 +136,103 @@ permissions を宣言せず呼び出し側の権限をそのまま使い(呼ば�
 [GitHub Docs](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations))、
 書き込み権限つきのトークンは記録ステップと Issue 起票ステップにだけ渡す(チェックアウトは
 persist-credentials: false)。既存の呼び出し側は従来どおり contents: read / issues: write。
+
+### 2-3. ジョブの組み方と Actions の分数(2026-10-08 レン承認「0円の対策を進める」)
+
+**前提**: private リポジトリの Actions は月2,000分まで無料で、yosage-inc は予算0円・超過で停止の設定(§5)。
+課金はジョブごとに1分単位で切り上げる(「GitHub rounds the minutes and partial minutes each job uses up to the
+nearest whole minute.」[GitHub Docs](https://docs.github.com/en/billing/reference/actions-runner-pricing))。
+**数秒で終わる検査でも、独立したジョブにすると1分かかる** → 小さい検査は既にあるジョブに同居させる。
+
+**実測**(2026-09-01〜10-07 の全実行。各ジョブの開始〜終了の秒数を1分単位に切り上げて合計した値は1,647分で、
+請求 API の日別・リポジトリ別の合計1,644分とほぼ一致。集計は `gh api repos/yosage-inc/<repo>/actions/runs` →
+各実行の `attempts/<n>/jobs`):
+
+| ジョブ(QA + Deploy) | 課金(分) | 実時間(分) | 回数 | 1回の実時間(平均) |
+|---|---|---|---|---|
+| e2e-quality(E2E・リンク・Lighthouse) | 472 | 443 | 80 | 332秒 |
+| deploy | 195 | 136 | 114 | 71秒 |
+| build-test | 157 | 103 | 103 | 60秒 |
+| classify | 139 | 19 | 139 | 8秒 |
+| qa-gate | 139 | 8 | 139 | 4秒 |
+| secrets-scan | 138 | 36 | 138 | 15秒 |
+| post-deploy(verify-production) | 112 | 12 | 112 | 7秒 |
+| security-deep | 50 | 36 | 38 | 56秒 |
+| approval | 14 | 1 | 14 | 4秒 |
+
+- 小さい5ジョブ(classify・secrets-scan・qa-gate・approval・verify-production)は課金542分に対して実時間76分
+- e2e-quality の大半は Lighthouse(smoke_paths の各ページを3回ずつ計測。1実行あたり平均: サウナ5ページ219秒・
+  KAZOERU 7ページ284秒・リフォーム8ページ320秒・塗装8ページ323秒)
+- 期間の合計1,647分のうち、Dependabot 自身の更新ジョブ(103分)と公開リポジトリ qa-standard の実行(4分)は
+  無料枠に数えない(「Running Dependabot on standard GitHub-hosted or self-hosted runners does not count towards
+  your included GitHub Actions minutes.」[GitHub Docs](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-on-actions)、
+  公開リポジトリの標準ランナーは無料 [GitHub Docs](https://docs.github.com/en/billing/concepts/product-billing/github-actions))。
+  請求 API の合計にはこれらも載るので、無料枠の消費は請求 API の値より少し少ない。
+  Dependabot が作った PR に走る QA(13回・142分)は Dependabot 自身の実行ではなく通常のワークフローの実行なので、
+  この除外には当たらない
+
+**変えたこと**(qa.yml。呼び出し側は変更不要):
+1. **secrets-scan を classify に同居**: TruffleHog の実時間は平均7〜8秒・最大15秒で、classify(平均8秒)と合わせても
+   1分に収まる。qa-standard の checkout より前に置き、スキャンする中身は従来のジョブと同じ。見つかったら判定ジョブごと
+   落ち、後ろの検査とデプロイは全部飛ぶ(以前は他の検査が走り切ってから qa-gate で止まっていた=失敗時も分数が減る)。
+   classify の最初の checkout の認証情報(本番基準モードの `git ls-remote` が使う)には触れていない
+2. **qa-gate を廃止**: 呼び出し側の deploy は `needs: qa` + 状態関数の無い if(=暗黙の success())なので、qa の中の
+   ジョブが1つでも失敗すれば飛ぶ(下の試験で確認)。qa-gate のもう一つの役(PR の必須チェック)は、ブランチ保護・
+   ルールセットが GitHub Free の private リポジトリでは使えない(API 403。2026-10-08 に全6リポジトリで確認)ため
+   使われていなかった
+3. **approval を任意化**(入力 `l3_approval`、既定 false): 「If you are on a GitHub Free, GitHub Pro, or GitHub Team plan,
+   required reviewers are only available for public repositories.」([GitHub Docs](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments))。
+   ゲートは数秒で素通りしていた。さらに「設定漏れ検出」の警告は、gh api が失敗すると標準出力のエラー本文と
+   `|| echo 0` の「0」がつながって判定をすり抜け、一度も出ていなかった(9/1〜10/7 の承認ジョブ14回のログすべてで確認。
+   承認ジョブのトークンは contents: read だけで environment の設定を読めない)→ 読めない場合と未設定の場合を分けて警告する形に直した
+4. actionlint の既存の指摘2件を直した(未使用の変数・Lighthouse の引数の単語分割。Lighthouse に渡す引数は4サイトの
+   smoke_paths で従来と完全一致)
+
+**見込み**: 1実行あたり L0〜L2 で2分・L3 で3分減。上の期間に当てはめると291分(全体の18%・QA + Deploy の21%)。
+
+**試験**(公開リポジトリ qa-standard の使い捨てブランチ。標準ランナーは無料なので分数はかからない。
+呼び出し側と同じ形の deploy 役ジョブ = `needs: qa` + 状態関数の無い if を置いた):
+
+| 場面 | 期待 | 結果 |
+|---|---|---|
+| T1 L0 で全部通る | deploy 役が走る | ✅ classify(TruffleHog 4秒込みで9秒)→ deploy 役が走った。secrets-scan・qa-gate のジョブは無い |
+| T2 L1 で build が落ちる | deploy 役は飛ぶ | ✅ build-test=failure → e2e・approval・deploy 役=skipped |
+| T3 classify が落ちる(deployed_ref の名前が不正) | 後ろは全部飛ぶ | ✅ TruffleHog は通過→判定で「deployed_ref の名前が不正」→ 全部 skipped |
+| T4 L2 で全部通る(2ページ) | deploy 役が走る | 初回は試験ページにリンクが無くリンク検査が「リンク0件」で落ちた(= e2e の途中の段が落ちても deploy 役は飛ぶことの確認にもなった)→ ページを直して再実行: ✅ classify → build-test → e2e-quality(E2E・リンク・Lighthouse)が通り deploy 役が走った |
+| T5 L2 で E2E が落ちる(ページの JS エラー) | deploy 役は飛ぶ | ✅ E2E=failure(リトライ1回も失敗)→ deploy 役=skipped |
+
+サウナ(portal-sauna)では使い捨てブランチ `claude/qa-min-test` の手動実行(workflow_dispatch・本番基準モード・
+`l3_approval: true`)で1回確かめた。main 以外の ref なので deploy・post-deploy は動かず、本番と qa-deployed は変わらない:
+run 37656897258(2026-10-08 02:09 JST)= success。classify 16秒(TruffleHog が全履歴1,691チャンクを走査して検出0 →
+本番基準モードの判定「本番の検証済み e40681e からの差分で判定: .github/workflows/qa-deploy.yml」で L3。TruffleHog を同じ
+ジョブに入れても、判定の `git ls-remote`・`git fetch`(最初の checkout の認証情報を使う)は動いた)→ build-test 8秒・
+security-deep 66秒・e2e-quality 275秒 → approval 4秒(直した設定漏れ検出が「qa-l3-approval environment の設定を読めなかった」
+と警告)→ deploy・post-deploy は skipped(main 以外)。課金換算は QA 部分で10分(既定の `l3_approval: false` なら9分)
+
+**前後の実測**(1実行あたりの課金分数。変更前は 9/1〜10/7 の main への push の実行・全サイト平均。
+「QA」は qa.yml の中のジョブ、「デプロイ」は deploy + post-deploy で、今回は変えていない):
+
+| レベル | 変更前 QA + デプロイ | うち今回なくなった分 | 変更後(実測) |
+|---|---|---|---|
+| L0 | 3.0 + 2.6 = 5.6分(36回) | 2分(secrets-scan・qa-gate) | (main に入れた後の実行で追記) |
+| L1 | 4.5 + 2.9 = 7.4分(20回) | 2分 | (同上) |
+| L2 | 10.2 + 2.7 = 12.9分(45回) | 2分 | (同上) |
+| L3 | 12.3 + 1.7 = 14.0分(21回) | 2.7分(approval は L3 の push のうち14回) | QA 9分(サウナの試験。同じサイトの変更前は QA 11.4分・5回)+ デプロイ(変わらない) |
+
+**運用ルール: push をまとめる**: push 1回ごとに QA + デプロイが1本走る。10/1〜10/7 の main への push 76回のうち39回は、
+同じサイトへの直前の push から20分以内だった(別のセッションの push も含むので「まとめられた上限」)。1つの作業の
+push は最後に1回にまとめる(~/.claude/CLAUDE.md と、同じサイトに1日2回 push しうる定期タスク
+yosage-daily-revenue・yosage-weekly-content の SKILL.md に記載)。`[skip ci]` は使わない(順番の守りで、前の実行も
+そのコミットもデプロイしなくなる)。
+
+**品質に関わるので提案止まりのもの**(レン判断待ち。数字は上の期間に当てはめた見込み):
+
+| 案 | 減る分数 | 引き換え |
+|---|---|---|
+| Lighthouse を各ページ3回 → 1回 | 233分(14%) | 計測のぶれで止まるデプロイが戻る(3回の中央値は、同じビルドで LCP が 2700〜6300ms と振れて自動デプロイが止まったのを受けて 2026-08-12 に入れた。cd40116) |
+| Lighthouse をトップページだけ(3回) | 312分(19%) | テンプレート別の性能劣化を Lighthouse では拾えなくなる(E2E スモークは全 smoke_paths のまま) |
+| Dependabot の定期更新を週1 → 月1 | 約100分(PR の QA 142分の4分の3が減ると仮定) | 依存の更新が最大1か月遅れる(新しく公開された脆弱性は L3 の OSV と週次スキャンで別に拾う) |
+| post-deploy を deploy ジョブに同居 | 96分(6%) | 4サイトの呼び出し側と順番の守り・本番基準モードの記録(書き込み権限)の組み直しが要る |
 
 ## 3. 品質テストの標準
 
@@ -328,7 +428,7 @@ X-Frame-Options: DENY                              # CSP frame-ancestors の後�
 
 | いつ | 何が走る | 人間(レン)の関与 |
 |---|---|---|
-| 毎 push / PR | classify → レベル別 QA → qa-gate | L3 のみ承認クリック |
+| 毎 push / PR | classify(シークレットスキャン込み)→ レベル別 QA | なし(L3 の承認ゲートは `l3_approval: true` のサイトだけ。今は該当なし) |
 | デプロイ直後 | 本番スモーク + ヘッダ検査(失敗時は30秒×3回リトライ) | 失敗 Issue が来たら最優先で対応指示 |
 | 毎週月曜 09:00 JST | 依存脆弱性 / 本番ヘッダ / 全リンク / (portal) DAST | 起票された Issue の確認 |
 
@@ -341,8 +441,11 @@ X-Frame-Options: DENY                              # CSP frame-ancestors の後�
   yosage-inc は Actions の予算0円・超過で停止の設定=使い切ると月末まで全サイトの自動 QA・デプロイが止まる)。
   課金はジョブごとに1分単位で切り上げるため
   ([GitHub Docs](https://docs.github.com/en/billing/reference/actions-runner-pricing))、
-  実測の1実行あたり(2026-08〜10、post-deploy まで含む)は L0 約5分・L1 約6〜8分・L2 約10〜14分・L3 約9〜17分。
-  月の合計は 2026-07 415分 / 08 1,548分 / 09 753分 / 10月は1〜7日で802分(billing usage API で実測)。
+  実測の1実行あたり(2026-08〜10、post-deploy まで含む)は L0 約5分・L1 約6〜8分・L2 約10〜14分・L3 約9〜17分
+  (2026-10-08 の対策後の数字と内訳は §2-3)。
+  月の合計は 2026-07 415分 / 08 1,548分 / 09 753分 / 10月は1〜7日(UTC)で891分(billing usage API で実測)。
+  この値には無料枠に数えない Dependabot 自身の更新ジョブと公開リポジトリの分も含まれる
+  (それを除くと 09 674分 / 10月1〜7日 863分。§2-3)。
   reusable workflow の実行分数は**呼び出し元リポジトリに課金される**ため、サイトを増やすほど
   合計消費は増える(qa-standard 側には集約されない)
   ([GitHub Docs](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations))。

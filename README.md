@@ -3,7 +3,7 @@
 レンのWeb事業(メディアサイト・ポータル)全サイト共通の品質・セキュリティ検査基盤。
 **リリースの大きさ・複雑さを自動判定し、必要なレベルのテストだけを自動実行する。**
 記事追加のような軽微な更新は約1分で通過し、認証・決済・依存関係に触れるリリースは
-フルセキュリティ検査+レンの手動承認を通る。
+フルセキュリティ検査を通る(レンの手動承認ゲートは GitHub のプランの制約で今は使っていない。下の「Actions の分数」)。
 
 ## 仕組みの全体像
 
@@ -11,15 +11,15 @@
 push / PR
    │
    ▼
-[classify] 変更ファイルと差分規模から QA レベルを自動判定
+[classify] シークレットスキャン(全レベル)+ 変更ファイルと差分規模から QA レベルを自動判定
    │
    ├─ L0 コンテンツのみ(記事・データ・画像) → シークレットスキャンのみ(約1分)
    ├─ L1 軽微なコード変更(≤5ファイル/150行) → + lint / unit / build
    ├─ L2 標準リリース(レイアウト・大規模変更) → + E2Eスモーク / リンク切れ / Lighthouse
-   └─ L3 セキュリティ敏感(認証・決済・DB・依存) → + SAST / 依存脆弱性 / 🙋レン承認
+   └─ L3 セキュリティ敏感(認証・決済・DB・依存) → + SAST / 依存脆弱性(🙋レン承認は l3_approval: true のときだけ)
    │
    ▼
-[qa-gate] 全ジョブ成功で通過 → [deploy] main の先頭のときだけ wrangler deploy → [post-deploy] 本番スモーク+ヘッダ検査
+全ジョブ成功(1つでも落ちれば飛ぶ) → [deploy] main の先頭のときだけ wrangler deploy → [post-deploy] 本番スモーク+ヘッダ検査
                                                               ├ 失敗時: 30秒間隔で最大3回リトライ
                                                               │  (エッジ伝播前の旧レスポンス誤検知を防止)
                                                               ├ それでも失敗: Issue自動起票(ロールバック提案)
@@ -71,6 +71,24 @@ Node の3サイトは、L3 が依存の既知脆弱性(OSV / npm audit)で通ら
 L3 が緑になったら、順番の守りと同じ push に `deployed_ref` / `mark_deployed_ref` / post-deploy の
 `permissions` を載せる(templates/caller-media-qa-deploy.yml が完成形)。
 
+## Actions の分数(無料枠 月2,000分)
+
+private リポジトリの Actions は月2,000分まで無料で、yosage-inc は予算0円・超過で停止の設定。
+**使い切ると月末まで全サイトの自動 QA・デプロイが止まる**(docs/qa-policy.md §5)。
+課金はジョブごとに1分単位で切り上げなので、数秒で終わる検査でも独立したジョブにすると1分かかる。
+
+- **2026-10-08 の対策**(レン承認「0円の対策を進める」): secrets-scan を classify に同居・qa-gate を廃止・
+  approval を任意化(入力 `l3_approval`、既定は使わない)。1実行あたり L0〜L2 で2分・L3 で3分減る
+  (9/1〜10/7 の実績に当てはめると全体の約18%。実測の前後比較は docs/qa-policy.md §2-3)
+- **push は1つの作業の最後に1回にまとめる**(push 1回ごとに QA+デプロイが1本走る)。
+  `[skip ci]` は使わない(順番の守りで、前の実行もそのコミットもデプロイしなくなる)
+- 公開リポジトリ(この qa-standard)の実行と、Dependabot 自身の更新ジョブは無料枠に数えない
+  ([GitHub Docs](https://docs.github.com/en/billing/concepts/product-billing/github-actions) /
+  [Dependabot](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-on-actions))。
+  ワークフローの試験は qa-standard の使い捨てブランチで行う(手順は docs/qa-policy.md §2-3)
+- 今月の使用量(Dependabot と公開リポジトリの分も含むので、無料枠の消費より多めに出る):
+  `gh api "/organizations/yosage-inc/settings/billing/usage/summary?year=2026&month=10" --jq '.usageItems[]|select(.sku=="actions_linux").grossQuantity'`
+
 ## リポジトリ構成
 
 | パス | 役割 |
@@ -119,16 +137,22 @@ L3 が緑になったら、順番の守りと同じ push に `deployed_ref` / `m
   - `CLOUDFLARE_API_TOKEN`(Workers デプロイ権限つきトークン)
   - `CLOUDFLARE_ACCOUNT_ID`
 - [ ] `templates/dependabot.yml` を `.github/dependabot.yml` としてコピー(ロビの導入作業に含めてOK)
-- [ ] Settings → Environments → `qa-l3-approval` を作成し、
-  **Required reviewers に自分を追加**(これが L3 の承認ゲートになる)
+- [ ] ~~Settings → Environments → `qa-l3-approval` を作成し、Required reviewers に自分を追加~~
+  → **GitHub Free / Pro / Team の private リポジトリでは required reviewers を設定できない**
+  ([GitHub Docs](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)。
+  2026-08-13 に API 422 でも確認)。qa.yml は既定で承認ジョブを走らせない(入力 `l3_approval`。下の「Actions の分数」)
 - [ ] Issues のラベル `qa-failure`(赤)と `security`(黄)を作成(Issue自動起票用)
-- [ ] (PR運用を始める場合) ブランチ保護の required status check には **`qa-gate` だけ**を指定する。
-  qa-gate は QA レベルに関係なく常に実行されるため「スキップされた check が Pending のまま
-  PR をブロックする」という GitHub 公式ドキュメント記載の罠を回避できる
+- [ ] (PR の必須チェックを使う場合) ブランチ保護・ルールセットは GitHub Free の private リポジトリでは使えない
+  (API 403「Upgrade to GitHub Pro or make this repository public」、2026-10-08 に全サイトで確認)。
+  有料プランで使うときは、呼び出し側に「`if: always()` で `needs.qa.result` を見て success 以外なら落とす」
+  集約ジョブを1つ足してそれだけを必須にする。`needs` だけの集約ジョブは、依存が落ちると skipped になり、
+  skipped は「Success」として扱われるため素通りする
+  ([GitHub Docs](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks))。
+  以前の qa-gate ジョブがこの役だったが、必須チェックを使えない間は毎回1分かかるだけなので 2026-10-08 に廃止した
 
 ### 運用中(受動的でOK)
-- [ ] L3 リリース時: GitHub から届く承認依頼メールの「Review deployments」→ Approve
-  (内容に不安があればロビに「このL3リリースの変更内容を説明して」と聞く)
+- [ ] (`l3_approval: true` のサイトだけ) L3 リリース時: GitHub から届く承認依頼メールの「Review deployments」→ Approve
+  (内容に不安があればロビに「このL3リリースの変更内容を説明して」と聞く。今は該当サイトなし)
 - [ ] 週次スキャンが起票した Issue の確認(対応はロビに依頼でOK)
 - [ ] デプロイ後検証失敗の Issue が来たら最優先(本番が壊れている可能性)
 
