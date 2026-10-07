@@ -114,6 +114,20 @@ qa.yml の入力 `deployed_ref` と post-deploy.yml の入力 `mark_deployed_ref
 ジョブは増えない(Actions はジョブごとに1分単位で切り上げて課金されるため、
 [GitHub Docs](https://docs.github.com/en/billing/reference/actions-runner-pricing))。
 
+**本番での実測(2026-10-08 portal-sauna)**:
+1. 導入コミット e9fff29(run 37644593424): `qa-deployed` が無いので警告つきで L3 → 全検査通過 → デプロイ →
+   検証通過 → 「本番の検証済みコミットを記録(新規): qa-deployed = e9fff29」
+2. 穴の再現テスト: L3 の 0df8c41(.github の変更・run 37647203989)を push し、その重い検査の実行中に
+   手順書だけの 1024dd2(従来なら L0・run 37647263125)を積んだ。1024dd2 は
+   「本番の検証済み e9fff29 からの差分で判定(ほかの push の未検証の変更を含む): .github/workflows/qa-deploy.yml」で
+   **L3** になり、SAST(15:52:08)と E2E(15:56:05)を通った後の 15:56:20 にデプロイ・記録 e9fff29 → 1024dd2。
+   0df8c41 の実行は「デプロイを飛ばした(main が先に進んでいる)」で、記録も進めない。
+   従来の判定なら 1024dd2 は L0 として約1分半後(15:52頃)にデプロイし、0df8c41 の検査完了(15:55:38)より前に
+   未検査の .github の変更ごと本番に出ていた
+3. 直後に別セッションが push した build.py の変更 e40681e は、記録(1024dd2)=直前の push なので通常どおり L2
+   (余計な引き上げなし)
+4. 本番の全153ページ(sitemap + robots.txt・404)が `qa-deployed` のコミットの手元ビルドとバイト一致(各段階で実測)
+
 **権限**: `qa-deployed` の更新には post-deploy ジョブに `contents: write` が要る。post-deploy.yml は
 permissions を宣言せず呼び出し側の権限をそのまま使い(呼ばれる側は権限を上げられないため。
 [GitHub Docs](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations))、
