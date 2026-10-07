@@ -4,10 +4,15 @@
 #   uses: <owner>/qa-standard/.github/workflows/qa.yml@main
 #
 # レベルと実行内容:
-#   L0 コンテンツのみ    → シークレットスキャンのみ (約1分)
+#   L0 コンテンツのみ    → シークレットスキャンのみ (判定ジョブの中で実行。約1分)
 #   L1 軽微なコード変更  → + lint / unit / build
 #   L2 標準リリース      → + E2Eスモーク / リンク切れ / Lighthouse
-#   L3 セキュリティ敏感  → + SAST / 依存脆弱性 / レン承認ゲート
+#   L3 セキュリティ敏感  → + SAST / 依存脆弱性 (+ 人の承認ゲートは l3_approval: true のときだけ)
+#
+# Actions の分数: 課金はジョブごとに1分単位で切り上げられる。数秒で終わる検査は独立したジョブにせず、
+# 既にあるジョブに同居させる(2026-10-08: secrets-scan を classify に統合・qa-gate を廃止・
+# approval を任意化。docs/qa-policy.md §2-3)。
+# 呼び出し側の deploy は `needs: qa` で、ここのジョブが1つでも失敗・取り消しになれば飛ぶ(実測済み)。
 name: qa
 
 on:
@@ -63,6 +68,15 @@ on:
         required: false
         default: ""
         type: string
+      l3_approval:
+        description: >-
+          L3 で人の承認ゲート(environment: qa-l3-approval の required reviewers)を通すか。
+          GitHub Free / Pro / Team の private リポジトリでは required reviewers を設定できず、
+          ゲートが空回り(数秒で素通り・1分課金)するだけなので既定は使わない。
+          required reviewers を設定できる環境(公開リポジトリ・Enterprise)で true にする
+        required: false
+        default: false
+        type: boolean
       qa_standard_ref:
         required: false
         default: "main"
@@ -76,10 +90,10 @@ permissions:
   contents: read
 
 jobs:
-  # ---------- 1. リリース規模の自動判定 ----------
+  # ---------- 1. シークレットスキャン(全レベル) + リリース規模の自動判定 ----------
   classify:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       level: ${{ steps.run.outputs.level }}
       reason: ${{ steps.run.outputs.reason }}
@@ -97,6 +111,16 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+      # シークレットスキャン(全レベル。API キーの誤コミットは記事更新でも起こる事故)。
+      # 以前は別ジョブ(secrets-scan)だったが、実時間は平均15秒なのに1分課金されていたので判定ジョブに同居させた
+      # (2026-10-08)。qa-standard の checkout より前に置き、スキャンする中身を従来のジョブと同じにする。
+      # 見つかれば判定ジョブごと落ち、後ろの検査とデプロイは全部飛ぶ。
+      # TruffleHog OSS (Apache-2.0): 全履歴から API キー等の混入を検出。
+      # gitleaks は Organization 利用に商用ライセンスが必要になったため不採用 (docs/qa-policy.md 参照)
+      - name: TruffleHog secret scan (全レベル)
+        uses: trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11 # v3.96.0
+        with:
+          extra_args: --results=verified,unknown
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ github.repository_owner }}/qa-standard
@@ -156,6 +180,7 @@ jobs:
           LEVEL: ${{ steps.run.outputs.level }}
           REASON: ${{ steps.run.outputs.reason }}
           DEPLOYED_REF: ${{ inputs.deployed_ref }}
+          L3_APPROVAL: ${{ inputs.l3_approval }}
         run: |
           {
             echo "## QA レベル: $LEVEL"
@@ -163,27 +188,13 @@ jobs:
             if [ -n "$DEPLOYED_REF" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
               echo "- 判定の基準: 本番に出て検証を通った最新のコミット(ブランチ \`$DEPLOYED_REF\`)からの差分。ほかの push の未検証の変更が含まれるときは、タグ・level_override は上げるのにだけ効く"
             fi
+            if [ "$LEVEL" = "L3" ] && [ "$L3_APPROVAL" != "true" ]; then
+              echo "- 人の承認ゲート: 使わない設定(入力 \`l3_approval\`)。GitHub Free / Pro / Team の private リポジトリでは required reviewers を設定できないため"
+            fi
             echo "- 上書きしたい場合: コミットメッセージに \`[qa:L0]\`〜\`[qa:L3]\`、または workflow_dispatch の level_override"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # ---------- 2. シークレットスキャン (全レベル) ----------
-  secrets-scan:
-    needs: classify
-    if: needs.classify.outputs.run_secrets == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          fetch-depth: 0
-      # TruffleHog OSS (Apache-2.0): 全履歴から API キー等の混入を検出。
-      # gitleaks は Organization 利用に商用ライセンスが必要になったため不採用 (docs/qa-policy.md 参照)
-      - name: TruffleHog secret scan
-        uses: trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11 # v3.96.0
-        with:
-          extra_args: --results=verified,unknown
-
-  # ---------- 3. lint / unit / build (L1+) ----------
+  # ---------- 2. lint / unit / build (L1+) ----------
   build-test:
     needs: classify
     if: needs.classify.outputs.run_build == 'true'
@@ -236,7 +247,7 @@ jobs:
           path: ${{ inputs.working_directory }}/${{ inputs.build_output_dir }}
           retention-days: 3
 
-  # ---------- 4. E2E スモーク + リンク切れ + Lighthouse (L2+) ----------
+  # ---------- 3. E2E スモーク + リンク切れ + Lighthouse (L2+) ----------
   e2e-quality:
     needs: [classify, build-test]
     if: needs.classify.outputs.run_e2e == 'true'
@@ -257,7 +268,7 @@ jobs:
       - name: Serve build output
         run: |
           npx --yes serve -l 8788 site-dist &
-          for i in $(seq 1 30); do curl -sf http://localhost:8788 >/dev/null && break; sleep 1; done
+          for _ in $(seq 1 30); do curl -sf http://localhost:8788 >/dev/null && break; sleep 1; done
       - name: E2E smoke (Playwright)
         env:
           SMOKE_BASE_URL: http://localhost:8788
@@ -284,12 +295,14 @@ jobs:
             "site-dist/**/*.html"
           fail: true
       - name: Lighthouse CI (smoke_paths のページのみ)
+        env:
+          SMOKE_PATHS: ${{ inputs.smoke_paths }}
         run: |
           npm i --no-save @lhci/cli
-          URLS=""
-          IFS=',' read -ra PATHS <<< "${{ inputs.smoke_paths }}"
-          for p in "${PATHS[@]}"; do URLS="$URLS --collect.url=http://localhost:8788${p}"; done
-          npx lhci autorun $URLS --config=config/lighthouserc.json
+          urls=()
+          IFS=',' read -ra PATHS <<< "$SMOKE_PATHS"
+          for p in "${PATHS[@]}"; do urls+=("--collect.url=http://localhost:8788${p}"); done
+          npx lhci autorun "${urls[@]}" --config=config/lighthouserc.json
       - name: Upload QA reports (Playwright / Lighthouse)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -301,7 +314,7 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # ---------- 5. セキュリティ深掘り: SAST + 依存脆弱性 (L3) ----------
+  # ---------- 4. セキュリティ深掘り: SAST + 依存脆弱性 (L3) ----------
   security-deep:
     needs: classify
     if: needs.classify.outputs.run_sast == 'true'
@@ -325,10 +338,14 @@ jobs:
         run: |
           if [ -f package-lock.json ]; then npm audit --audit-level=high; else echo "lockfile なしのためスキップ"; fi
 
-  # ---------- 6. L3 承認ゲート (レンの手動承認) ----------
+  # ---------- 5. L3 承認ゲート (レンの手動承認。l3_approval: true のときだけ) ----------
+  # GitHub Free / Pro / Team の private リポジトリでは environment の required reviewers を設定できない
+  # (GitHub Docs: deployments-and-environments)。設定できないまま毎回走らせても数秒で素通りして
+  # 1分課金されるだけなので、既定では走らせない(2026-10-08)。true にした呼び出し側では従来どおり、
+  # 全部の検査が通った後にレンの承認を待つ
   approval:
-    needs: [classify, secrets-scan, build-test, e2e-quality, security-deep]
-    if: needs.classify.outputs.needs_approval == 'true' && github.event_name != 'pull_request'
+    needs: [classify, build-test, e2e-quality, security-deep]
+    if: inputs.l3_approval && needs.classify.outputs.needs_approval == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: qa-l3-approval   # ← リポジトリ設定で required reviewers = レン を設定 (README 参照)
@@ -338,38 +355,19 @@ jobs:
       - name: Verify approval gate is configured (設定漏れ検出)
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          reviewers=$(gh api "repos/${{ github.repository }}/environments/qa-l3-approval" \
-            --jq '[.protection_rules[]? | select(.type=="required_reviewers")] | length' 2>/dev/null || echo 0)
-          if [ "$reviewers" = "0" ]; then
-            echo "::warning title=L3承認ゲートが素通しです::qa-l3-approval environment に required reviewers が未設定のため、L3リリースが承認なしで通過しています。リポジトリの Settings → Environments → qa-l3-approval で Required reviewers を設定してください。"
+          # 設定を読めなかった(権限不足等)ときと、読めたが required reviewers が無いときを分けて警告する。
+          # 以前は gh api の失敗時に stdout のエラー本文と `|| echo 0` の「0」がつながり、どちらの警告も出ていなかった
+          if reviewers=$(gh api "repos/$REPO/environments/qa-l3-approval" \
+              --jq '[.protection_rules[]? | select(.type=="required_reviewers")] | length' 2>/dev/null); then
+            if [ "$reviewers" = "0" ]; then
+              echo "::warning title=L3承認ゲートが素通しです::qa-l3-approval environment に required reviewers が未設定のため、L3リリースが承認なしで通過しています。リポジトリの Settings → Environments → qa-l3-approval で Required reviewers を設定してください。"
+            fi
+          else
+            echo "::warning title=L3承認ゲートの設定を確認できない::qa-l3-approval environment の設定を読めなかった(GITHUB_TOKEN に actions: read が無い等)。Settings → Environments → qa-l3-approval で Required reviewers が設定されているか確かめてください。"
           fi
 
-  # ---------- 7. 最終ゲート: デプロイ可否の単一シグナル ----------
-  qa-gate:
-    needs: [classify, secrets-scan, build-test, e2e-quality, security-deep, approval]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Evaluate results
-        run: |
-          declare -A results=(
-            [secrets-scan]="${{ needs.secrets-scan.result }}"
-            [build-test]="${{ needs.build-test.result }}"
-            [e2e-quality]="${{ needs.e2e-quality.result }}"
-            [security-deep]="${{ needs.security-deep.result }}"
-            [approval]="${{ needs.approval.result }}"
-          )
-          fail=0
-          for job in "${!results[@]}"; do
-            r="${results[$job]}"
-            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
-              echo "❌ $job: $r"; fail=1
-            else
-              echo "✅ $job: $r"
-            fi
-          done
-          # classify 自体の失敗も検出
-          [ "${{ needs.classify.result }}" = "success" ] || { echo "❌ classify: ${{ needs.classify.result }}"; fail=1; }
-          exit $fail
+  # 最終ゲート(qa-gate)は 2026-10-08 に廃止: 呼び出し側の deploy は `needs: qa` で、ここのジョブが1つでも
+  # failure / cancelled なら飛ぶ(使い捨てブランチで実測。docs/qa-policy.md §2-3)。PR の必須チェックに
+  # 使う集約ジョブが要るとき(有料プランでブランチ保護を使う場合)は README「PR の必須チェック」を参照
