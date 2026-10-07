@@ -52,6 +52,74 @@ qa-standard リポジトリのワークフローはこの標準を実装した�
   そのため本基盤は「ワークフローは常に起動し、classify が内部でジョブを間引く」方式を採る。
   required check には常に実行される `qa-gate` のみを指定すること。
 
+### 2-1. 判定の基準(何と比べるか)
+
+| イベント | 比べる相手 | 備考 |
+|---|---|---|
+| pull_request | PR のベース | PR の変更全体 |
+| main への push(従来) | 直前の push(`github.event.before`) | その push で増えた変更だけを見る |
+| main への push / 手動実行(本番基準モード) | 本番に出て検証を通った最新のコミット(ブランチ `qa-deployed`) | このデプロイで本番が実際に変わる中身を見る(§2-2) |
+
+従来の「直前の push」基準には穴がある。デプロイされるのは「その push の変更」ではなく
+「その時点の main の全体」なので、前の push の変更が本番に出ていない(検査中・検査で落ちた・
+取り消された)と、その変更が後ろの push の軽い検査で本番に出る。
+
+### 2-2. 本番基準モード(2026-10-08 レン決定)
+
+**決定**: 判定の基準を「本番に出て post-deploy の検証を通った最新のコミット」に変える(案A)。
+qa.yml の入力 `deployed_ref` と post-deploy.yml の入力 `mark_deployed_ref` に同じブランチ名
+(`qa-deployed`)を渡すと有効になる。各サイトの deploy ジョブの「順番の守り」(main の先頭でない
+実行はデプロイを飛ばす)とセットで使う。
+
+**きっかけ・実績**(4サイトの QA+Deploy 実行履歴 2026-08-03〜10-07 を全件集計):
+- 検査で落ちた変更が、後ろの軽い push で本番に出た: 3件
+  (portal-sauna 8/4 問い合わせフォーム=SAST と E2E で落ちた後の L1 修正 cc9f0c0 / reform-soba 8/12
+  AdSense 導入=E2E で落ちた後の `[qa:L1]` 修正 19d55cf / portal-sauna 10/7 9922fa7 の L3 が Lighthouse で
+  落ちる前に L0 の 38e6876 が先にデプロイ)
+- 重い検査が終わる前に本番に出た: 2件(kazoeru 8/25 d5fd755・reform-soba 8/10 4ba3cae。どちらも直後に
+  遅い実行が古いビルドで上書きし、新しい更新が一時的に本番から消えた=順番の守りで防ぐ側の事故)
+- L3 が落ちた後の小修正が L1 判定で通る件(kazoeru 10/3)は、手作業(cancel → level_override=L3)で回避していた
+
+**しくみ**(scripts/classify-release.mjs の `--deployed-base`):
+- 判定する差分 = `qa-deployed` のツリー → head のツリー(2点の直接比較。履歴が書き換わっても本番との差になる)
+- ほかの push の未検証の変更が含まれる(本番のツリー ≠ 直前の push のツリー)ときは、
+  コミットメッセージのタグ・`level_override` は**上げるのにだけ**効く。自分の push の変更しか無いときは従来どおり
+- `qa-deployed` が無い(導入直後・削除)ときは、本番に出ていない変更が分からないので L3。
+  検証を通ったデプロイで post-deploy が自動的に作る
+- head が `qa-deployed` より古い(古い実行の Re-run)ときはデプロイされないので従来の判定
+- `qa-deployed` は post-deploy の検証が通ったときだけ、前にしか進めない(後から終わった古い実行は戻さない。
+  force push で履歴が分かれたときだけ付け替える)。デプロイを飛ばした実行・検証で落ちた実行は進めない
+- 本番と head の中身が同じ(デプロイ済みの先頭の再実行)なら、未検証の変更なし=安全側の L2
+
+**この方式でできること・できないこと**
+- 落ちた変更を revert すると本番との差が消えるので、検査は軽い方に戻る(従来は revert 自体が L3 だった)
+- 重い検査が落ちたら、直すか revert するまで、後ろに積んだ記事・データの更新も本番に出ない(意図した止まり方)
+- 本番基準モードの判定は、従来モードのサイトの判定を変えない(過去の push 1,002件で従来の判定と完全一致を確認)
+- 手作業のデプロイ(ローカルの wrangler deploy)は `qa-deployed` を進めない=次の CI はそれより前からの
+  差分で判定する(重い方に倒れるだけ)
+
+**採らなかった案**
+- 案B(デプロイ直前に本番からの差分で判定し直し、足りなければデプロイしない): 順番の守りと組み合わせると、
+  重い検査を通った古い実行は「先頭でない」で飛び、軽い先頭の実行は「検査が足りない」で止まり、
+  どちらもデプロイしない。解くには古い実行の待ち合わせ(待つ間も課金される)や手作業の再実行が要り、
+  4サイトそれぞれに複雑な処理が入る
+- 運用ルールのまま(L2/L3 の実行中はほかのセッションが push を待つ): 定期タスクなど自動で push する
+  ものは待てず、抜けても気づけない
+- concurrency(実行の直列化): GitHub の待機枠は1件だけで、待機中の新しい実行が後から来た古い実行
+  (Re-run 等)に取り消され、その古い実行は順番の守りで飛ぶ=どちらもデプロイしない穴になる
+
+**コスト**: 追加の外部サービス・支払いなし。増えるのは「本番に未反映の重い変更があるときに、
+後ろの push も重い検査になる」分の Actions 分数で、上の期間の実行履歴に当てはめると11回・
+約90分(月40分前後、無料枠2,000分の約2%)。記録の更新は post-deploy の既存ジョブの中で行うので
+ジョブは増えない(Actions はジョブごとに1分単位で切り上げて課金されるため、
+[GitHub Docs](https://docs.github.com/en/billing/reference/actions-runner-pricing))。
+
+**権限**: `qa-deployed` の更新には post-deploy ジョブに `contents: write` が要る。post-deploy.yml は
+permissions を宣言せず呼び出し側の権限をそのまま使い(呼ばれる側は権限を上げられないため。
+[GitHub Docs](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations))、
+書き込み権限つきのトークンは記録ステップと Issue 起票ステップにだけ渡す(チェックアウトは
+persist-credentials: false)。既存の呼び出し側は従来どおり contents: read / issues: write。
+
 ## 3. 品質テストの標準
 
 ### 3-1. テスト構成の考え方(テストピラミッド)
@@ -254,7 +322,13 @@ X-Frame-Options: DENY                              # CSP frame-ancestors の後�
   ③依存脆弱性 High 以上(1週間以内に更新) → ④リンク切れ・Lighthouse 劣化(次回リリースで)。
 - GitHub Actions コスト管理: private リポジトリの無料枠は Free プランで 2,000分/月、
   Linux ランナー $0.006/分([GitHub Docs、2026-07-24 確認](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions))。
-  L0 リリース(約1分)中心の運用なら1サイト月数十分で収まる。
+  有料の支払い方法が無い・予算0円のときは、使い切った時点で止まる
+  ([GitHub Docs、2026-10-08 確認](https://docs.github.com/en/billing/concepts/product-billing/github-actions)。
+  yosage-inc は Actions の予算0円・超過で停止の設定=使い切ると月末まで全サイトの自動 QA・デプロイが止まる)。
+  課金はジョブごとに1分単位で切り上げるため
+  ([GitHub Docs](https://docs.github.com/en/billing/reference/actions-runner-pricing))、
+  実測の1実行あたり(2026-08〜10、post-deploy まで含む)は L0 約5分・L1 約6〜8分・L2 約10〜14分・L3 約9〜17分。
+  月の合計は 2026-07 415分 / 08 1,548分 / 09 753分 / 10月は1〜7日で802分(billing usage API で実測)。
   reusable workflow の実行分数は**呼び出し元リポジトリに課金される**ため、サイトを増やすほど
   合計消費は増える(qa-standard 側には集約されない)
   ([GitHub Docs](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations))。

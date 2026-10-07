@@ -4,6 +4,10 @@
 #   - project_type: portal (ヘッダ検査が厳格化、週次で DAST が回る)
 #   - D1 マイグレーションは wrangler.toml / migrations/ の変更として自動的に L3 判定される
 # 必要な secrets: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+#
+# デプロイの安全装置(順番の守り + 本番基準モード)は caller-media-qa-deploy.yml の冒頭の説明と同じ。
+# ポータルは D1 マイグレーションもあるので、先頭の確認をマイグレーションの前に置く(古い実行が
+# マイグレーションだけ流すのを防ぐ)。concurrency は足さない
 name: QA + Deploy
 
 on:
@@ -31,12 +35,15 @@ jobs:
       build_output_dir: dist
       smoke_paths: "/,/login"            # ← 主要ページに合わせて変更
       level_override: ${{ github.event.inputs.level_override || '' }}
+      deployed_ref: qa-deployed
 
   deploy:
     needs: qa
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      deployed: ${{ steps.tip.outputs.is_tip }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -44,12 +51,34 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      # 順番の守り: main の先頭でない実行はマイグレーションもデプロイもしない(先頭のコミットの実行が行う)
+      - name: Check main tip (順番の守り)
+        id: tip
+        run: |
+          tip=""
+          for _ in 1 2 3; do
+            tip=$(git ls-remote origin refs/heads/main | cut -f1)
+            [ -n "$tip" ] && break
+            sleep 5
+          done
+          if [ -z "$tip" ]; then
+            echo "::error::main の先頭を取得できず、デプロイの順番を確かめられないため止めた(Re-run で再実行する)"
+            exit 1
+          fi
+          if [ "$tip" != "$GITHUB_SHA" ]; then
+            echo "::notice title=デプロイを飛ばした(main が先に進んでいる)::main の先頭は ${tip:0:7}。先頭のコミットの実行がデプロイする"
+            echo "is_tip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_tip=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Apply D1 migrations (remote)
+        if: steps.tip.outputs.is_tip == 'true'
         run: npx wrangler d1 migrations apply DB --remote
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Deploy to Cloudflare Workers
+        if: steps.tip.outputs.is_tip == 'true'
         run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -57,8 +86,14 @@ jobs:
 
   post-deploy:
     needs: deploy
+    # 実際にデプロイした実行だけが本番を検証し、検証が通ったら qa-deployed を進める
+    if: needs.deploy.outputs.deployed == 'true'
+    permissions:
+      contents: write   # qa-deployed ブランチの更新(post-deploy.yml の記録ステップだけが使う)
+      issues: write     # 検証失敗時の Issue 起票
     uses: yosage-inc/qa-standard/.github/workflows/post-deploy.yml@main
     with:
       site_url: https://<YOUR-DOMAIN>       # ← 本番ドメインに変更
       smoke_paths: "/,/login"
       profile: portal
+      mark_deployed_ref: qa-deployed

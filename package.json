@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "classify": "node scripts/classify-release.mjs",
+    "test": "node scripts/classify-release.test.mjs",
     "check-headers": "node scripts/check-headers.mjs",
     "smoke": "node scripts/smoke-check.mjs"
   }

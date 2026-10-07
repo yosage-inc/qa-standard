@@ -1,6 +1,8 @@
 # post-deploy.yml — デプロイ直後の本番検証 (reusable workflow)
 # 各サイトの deploy ジョブ完了後に呼ぶ。スモーク(主要ページ生存確認) + セキュリティヘッダ検査。
 # 失敗したら Issue を自動起票してジョブを落とす(= レンに通知が飛ぶ)。
+# mark_deployed_ref を渡すと、検証が通ったときにそのブランチを今回のコミットへ進める
+# (= 本番に出て検証を通った最新のコミットの記録。qa.yml の deployed_ref が判定の基準に使う)。
 #
 # デプロイ直後は Cloudflare Workers の新バージョンがエッジに伝播する前の旧レスポンスを
 # 検査して誤 FAIL することがある(portal-sauna Issue #3)。このため各チェックは
@@ -29,10 +31,20 @@ on:
         required: false
         default: "main"
         type: string
+      mark_deployed_ref:
+        description: >-
+          検証が通ったら、このブランチを今回のコミット(github.sha)へ進める (例: qa-deployed)。
+          qa.yml の deployed_ref と同じ名前にする。呼び出し側の post-deploy ジョブに
+          permissions: contents: write(+ issues: write)が要る。デプロイしなかった実行
+          (main の先頭でないので飛ばした等)からは呼ばないこと。空なら記録しない
+        required: false
+        default: ""
+        type: string
 
-permissions:
-  contents: read
-  issues: write
+# permissions はここに書かない: 呼び出し側のジョブが渡した権限をそのまま使う。
+# 呼ばれる側は権限を上げられないため、ここで contents: write を要求すると、それを渡していない
+# 既存の呼び出し側がすべて起動できなくなる。既存の呼び出し側にはワークフロー全体の
+# contents: read / issues: write がそのまま渡る(従来と同じ)。書き込み権限を使うのは最後の記録ステップだけ。
 
 jobs:
   verify-production:
@@ -44,6 +56,7 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/qa-standard
           ref: ${{ inputs.qa_standard_ref }}
+          persist-credentials: false   # トークン(書き込み権限つきのことがある)をディスクに残さない
 
       - name: Smoke check (本番生存確認)
         id: smoke
@@ -69,3 +82,55 @@ jobs:
           30秒間隔で最大3回リトライしても失敗しているため、エッジ伝播待ちによる誤検知の可能性は低いです。
           **直前のデプロイが原因の可能性が高いため、ロールバック(直前コミットの再デプロイ)を検討してください。**" \
             --label "qa-failure" || echo "Issue起票に失敗(ラベル未作成の可能性)。ログを確認してください。"
+
+      # 本番の検証済みコミットの記録: ブランチ mark_deployed_ref を今回のコミットへ進める。
+      # 記録は前にしか進めない(後から終わった古い実行が戻さない)。履歴が書き換わった(force push 等)
+      # ときだけは、今回のデプロイが最新の本番なので付け替える。
+      - name: Mark deployed (本番の検証済みコミットを記録)
+        if: success() && inputs.mark_deployed_ref != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF_NAME: ${{ inputs.mark_deployed_ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          if ! printf '%s' "$REF_NAME" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+            echo "::error::mark_deployed_ref の名前が不正: $REF_NAME"
+            exit 1
+          fi
+          for _ in 1 2 3; do
+            cur=$(gh api "repos/$REPO/git/matching-refs/heads/$REF_NAME" \
+              --jq "map(select(.ref == \"refs/heads/$REF_NAME\")) | (.[0].object.sha // \"\")")
+            if [ -z "$cur" ]; then
+              if gh api -X POST "repos/$REPO/git/refs" -f ref="refs/heads/$REF_NAME" -f sha="$SHA" >/dev/null; then
+                echo "::notice title=本番の検証済みコミットを記録(新規)::$REF_NAME = ${SHA:0:7}"
+                exit 0
+              fi
+            elif [ "$cur" = "$SHA" ]; then
+              echo "記録済み: $REF_NAME = ${SHA:0:7}"
+              exit 0
+            else
+              status=$(gh api "repos/$REPO/compare/$cur...$SHA" --jq .status)
+              case "$status" in
+                ahead)
+                  if gh api -X PATCH "repos/$REPO/git/refs/heads/$REF_NAME" -f sha="$SHA" -F force=false >/dev/null; then
+                    echo "::notice title=本番の検証済みコミットを記録::$REF_NAME: ${cur:0:7} → ${SHA:0:7}"
+                    exit 0
+                  fi ;;
+                behind|identical)
+                  echo "::notice title=記録は進めない::$REF_NAME は既に新しいコミット ${cur:0:7} を指している(後のデプロイが先に記録した)"
+                  exit 0 ;;
+                diverged)
+                  if gh api -X PATCH "repos/$REPO/git/refs/heads/$REF_NAME" -f sha="$SHA" -F force=true >/dev/null; then
+                    echo "::warning title=本番の検証済みコミットを付け替えた(履歴の書き換え)::$REF_NAME: ${cur:0:7} → ${SHA:0:7}"
+                    exit 0
+                  fi ;;
+                *)
+                  echo "::error::$REF_NAME(${cur:0:7})と ${SHA:0:7} の前後関係を判定できない: $status"
+                  exit 1 ;;
+              esac
+            fi
+            sleep 5
+          done
+          echo "::error title=本番の検証済みコミットを記録できなかった::本番には出て検証も通ったが、$REF_NAME を更新できなかった。次の push は記録の古いコミットからの差分で判定される(重い検査に倒れるだけで安全側)。権限(post-deploy ジョブの permissions: contents: write)を確認する"
+          exit 1

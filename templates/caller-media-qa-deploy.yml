@@ -3,6 +3,14 @@
 # 使い方: site_url / smoke_paths を自サイトに合わせて変更する (Organization は yosage-inc 設定済み)。
 # 必要な secrets (リポジトリ設定 → Secrets and variables → Actions):
 #   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+#
+# デプロイの安全装置(2つで1組。片方だけ外さない):
+#   - 順番の守り(deploy ジョブ): main の先頭でない実行はデプロイを飛ばす(古いビルドで本番を戻さない)
+#   - 本番基準モード(deployed_ref / mark_deployed_ref): 検査の重さを「本番に出て検証を通った最新のコミット
+#     (ブランチ qa-deployed)からの差分」で決める。L3 の実行中に積まれた L0 の push が未検査の変更ごと
+#     先にデプロイする穴を塞ぐ。qa-deployed は post-deploy が自動で進めるので手で動かさない
+#   concurrency は足さない(待機は1件だけで、待機中の新しいデプロイが後から来た古い実行に取り消され、
+#   その古い実行は順番の守りで飛ぶ=どちらもデプロイしない穴になる)
 name: QA + Deploy
 
 on:
@@ -30,12 +38,15 @@ jobs:
       build_output_dir: dist
       smoke_paths: "/,/about/"          # ← 主要ページに合わせて変更
       level_override: ${{ github.event.inputs.level_override || '' }}
+      deployed_ref: qa-deployed
 
   deploy:
     needs: qa
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      deployed: ${{ steps.deploy.outputs.deployed }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -44,16 +55,46 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - name: Deploy to Cloudflare Workers
-        run: npx wrangler deploy
+      # 順番の守り: QA の重さはコミットごとに違う(L0 約2分・L3 約10分)ので、先に push した遅い実行が
+      # 後から push した速い実行より後にデプロイして本番を古いビルドに戻すことがある。デプロイの直前に
+      # main の先頭を確かめ、このコミットより先に進んでいたら飛ばす(先頭のコミットの実行がデプロイする)。
+      # 古い実行の Re-run も飛ぶので、ロールバックは revert して push。
+      - name: Deploy to Cloudflare Workers (main の先頭のときだけ)
+        id: deploy
+        run: |
+          # wrangler を先に取ってくる(先頭の確認からデプロイ完了までを数秒にする)
+          npx --yes wrangler --version
+          tip=""
+          for _ in 1 2 3; do
+            tip=$(git ls-remote origin refs/heads/main | cut -f1)
+            [ -n "$tip" ] && break
+            sleep 5
+          done
+          if [ -z "$tip" ]; then
+            echo "::error::main の先頭を取得できず、デプロイの順番を確かめられないため止めた(Re-run で再実行する)"
+            exit 1
+          fi
+          if [ "$tip" != "$GITHUB_SHA" ]; then
+            echo "::notice title=デプロイを飛ばした(main が先に進んでいる)::main の先頭は ${tip:0:7}。このコミット ${GITHUB_SHA:0:7} を含む先頭のコミットの実行がデプロイするので、古いビルドで本番を上書きしない"
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          npx wrangler deploy
+          echo "deployed=true" >> "$GITHUB_OUTPUT"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
   post-deploy:
     needs: deploy
+    # 実際にデプロイした実行だけが本番を検証し、検証が通ったら qa-deployed を進める
+    if: needs.deploy.outputs.deployed == 'true'
+    permissions:
+      contents: write   # qa-deployed ブランチの更新(post-deploy.yml の記録ステップだけが使う)
+      issues: write     # 検証失敗時の Issue 起票
     uses: yosage-inc/qa-standard/.github/workflows/post-deploy.yml@main
     with:
       site_url: https://<YOUR-DOMAIN>       # ← 本番ドメインに変更
       smoke_paths: "/,/about/"
       profile: static
+      mark_deployed_ref: qa-deployed

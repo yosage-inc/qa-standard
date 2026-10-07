@@ -3,7 +3,7 @@
  * classify-release.mjs — リリースの大きさ・複雑さから QA レベル (L0-L3) を自動判定する。
  *
  * 使い方:
- *   node classify-release.mjs --base <sha> --head <sha> [--policy qa-policy.json] [--override L2] [--json]
+ *   node classify-release.mjs --base <sha> --head <sha> [--deployed-base <sha|unknown>] [--policy qa-policy.json] [--override L2] [--json]
  *
  * 判定順序(上が優先):
  *   1. --override / コミットメッセージの [qa:LN] タグ
@@ -11,6 +11,15 @@
  *   3. 全ファイルが L0 パス内なら L0 (コンテンツのみ)
  *   4. L2 パスに触れていれば L2 (テンプレート/レイアウト = 全ページ波及)
  *   5. 差分規模: しきい値以下なら L1、超えたら L2
+ *
+ * --deployed-base(本番基準モード): 本番に出て post-deploy の検証を通った最新のコミット。
+ *   指定すると、判定する差分を「--base(直前の push)→ head」から「本番の検証済みコミット → head」
+ *   (= このデプロイで本番が実際に変わる中身)に替える。L3 の実行中に積まれた L0 の push や、
+ *   検査で落ちた変更の後の小さな修正が、未検査の変更ごと低いレベルでデプロイされる穴を塞ぐ。
+ *   - ほかの push の未検証の変更が含まれるときは、タグ・--override はレベルを上げるのにだけ効く
+ *     (自分の push の変更しか無いときは従来どおり下げにも効く)
+ *   - "unknown"(本番の検証済みコミットの記録が無い)なら、何が本番に出ていないか分からないので L3
+ *   - head が本番の検証済みコミットより古い(古い実行の Re-run 等)ならデプロイされないので従来どおり
  *
  * 出力: GITHUB_OUTPUT があれば level / reason / run_* フラグを書き込む。--json で機械可読出力。
  */
@@ -30,6 +39,7 @@ const BASE = opt("base", process.env.QA_BASE_SHA || "");
 const HEAD = opt("head", process.env.QA_HEAD_SHA || "HEAD");
 const POLICY_PATH = opt("policy", "qa-policy.json");
 const OVERRIDE = (opt("override", "") || "").toUpperCase();
+const DEPLOYED_BASE = opt("deployed-base", process.env.QA_DEPLOYED_BASE || "");
 const AS_JSON = flag("json");
 const CWD = opt("cwd", process.cwd());
 
@@ -106,76 +116,128 @@ const matches = (file, key) => matchers[key].some((re) => re.test(file));
 function git(argv) {
   return execFileSync("git", argv, { cwd: CWD, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 }
+const gitOk = (argv) => {
+  try { git(argv); return true; } catch { return false; }
+};
+// 差分の取得: twoDot = 2つのツリーの直接比較(本番の中身 → head。履歴が書き換わっても本番との差になる)
+//             それ以外 = merge-base からの比較(PR・従来の push 判定)
+function diffStats(base, head, twoDot) {
+  const range = base ? (twoDot ? [base, head] : [`${base}...${head}`]) : null;
+  const nameOut = range ? git(["diff", "--name-only", ...range]) : git(["show", "--name-only", "--format=", head]);
+  const files = nameOut.split("\n").map((s) => s.trim()).filter(Boolean);
+  const numstat = range ? git(["diff", "--numstat", ...range]) : git(["show", "--numstat", "--format=", head]);
+  let lines = 0;
+  for (const line of numstat.split("\n")) {
+    const [add, del] = line.split("\t");
+    if (add && add !== "-") lines += parseInt(add, 10) || 0;
+    if (del && del !== "-") lines += parseInt(del, 10) || 0;
+  }
+  return { files, lines };
+}
+
+// ---------- 判定(差分 → レベル。タグは見ない) ----------
+const VALID = ["L0", "L1", "L2", "L3"];
+const rank = (l) => VALID.indexOf(l);
+function autoLevel(files, totalLines) {
+  if (files.length === 0) {
+    return { level: "L2", reason: "差分を取得できなかったため安全側で L2 (マージ/空コミットなら手動で [qa:L0] 指定可)" };
+  }
+  const l3hits = files.filter((f) => matches(f, "l3_paths"));
+  const nonContent = files.filter((f) => !matches(f, "l0_paths"));
+  const l2hits = files.filter((f) => matches(f, "l2_paths"));
+  if (l3hits.length > 0) {
+    return { level: "L3", reason: `セキュリティ敏感パスに変更: ${l3hits.slice(0, 5).join(", ")}${l3hits.length > 5 ? ` 他${l3hits.length - 5}件` : ""}` };
+  }
+  if (nonContent.length === 0) return { level: "L0", reason: `コンテンツ/データのみの変更 (${files.length}ファイル)` };
+  if (l2hits.length > 0) return { level: "L2", reason: `全ページ波及パスに変更: ${l2hits.slice(0, 5).join(", ")}` };
+  const t = policy.thresholds;
+  if (files.length <= t.l1_max_files && totalLines <= t.l1_max_lines) {
+    return { level: "L1", reason: `軽微なコード変更 (${files.length}ファイル / ${totalLines}行 ≤ ${t.l1_max_files}ファイル / ${t.l1_max_lines}行)` };
+  }
+  return { level: "L2", reason: `中規模以上のコード変更 (${files.length}ファイル / ${totalLines}行)` };
+}
 
 let files = [];
 let totalLines = 0;
 let commitMsg = "";
-try {
-  const range = BASE ? [`${BASE}...${HEAD}`] : [HEAD, "--root"]; // BASE 無し = 初回コミット等
-  const nameOut = BASE
-    ? git(["diff", "--name-only", `${BASE}...${HEAD}`])
-    : git(["show", "--name-only", "--format=", HEAD]);
-  files = nameOut.split("\n").map((s) => s.trim()).filter(Boolean);
-
-  const numstat = BASE
-    ? git(["diff", "--numstat", `${BASE}...${HEAD}`])
-    : git(["show", "--numstat", "--format=", HEAD]);
-  for (const line of numstat.split("\n")) {
-    const [add, del] = line.split("\t");
-    if (add && add !== "-") totalLines += parseInt(add, 10) || 0;
-    if (del && del !== "-") totalLines += parseInt(del, 10) || 0;
-  }
-  commitMsg = git(["log", "-1", "--format=%B", HEAD]).trim();
-} catch (e) {
-  console.error(`ERROR: git 差分の取得に失敗 (base=${BASE || "(none)"}, head=${HEAD}): ${e.message}`);
-  console.error("安全側に倒して L2 とします。");
-}
-
-// ---------- 判定 ----------
-const VALID = ["L0", "L1", "L2", "L3"];
 let level = null;
 let reason = "";
+let mode = BASE ? "push" : "head-commit";
+let othersPending = false; // ほかの push の未検証の変更が今回のデプロイに含まれるか
 
-// 1. 手動オーバーライド
-const tagMatch = commitMsg.match(/\[qa:(L[0-3])\]/i);
-if (VALID.includes(OVERRIDE)) {
-  level = OVERRIDE;
-  reason = `手動オーバーライド (--override ${OVERRIDE})`;
-} else if (tagMatch) {
-  level = tagMatch[1].toUpperCase();
-  reason = `コミットメッセージのタグ [qa:${level}]`;
+try {
+  commitMsg = git(["log", "-1", "--format=%B", HEAD]).trim();
+} catch (e) {
+  console.error(`ERROR: コミットメッセージの取得に失敗 (head=${HEAD}): ${e.message}`);
 }
 
-// 2-5. 自動判定
-if (!level) {
-  if (files.length === 0) {
-    level = "L2";
-    reason = "差分を取得できなかったため安全側で L2 (マージ/空コミットなら手動で [qa:L0] 指定可)";
-  } else {
-    const l3hits = files.filter((f) => matches(f, "l3_paths"));
-    const nonContent = files.filter((f) => !matches(f, "l0_paths"));
-    const l2hits = files.filter((f) => matches(f, "l2_paths"));
+// 手動の指定(--override が優先、無ければ head のコミットメッセージのタグ)
+const tagMatch = commitMsg.match(/\[qa:(L[0-3])\]/i);
+let manual = null;
+if (VALID.includes(OVERRIDE)) manual = { level: OVERRIDE, reason: `手動オーバーライド (--override ${OVERRIDE})` };
+else if (tagMatch) manual = { level: tagMatch[1].toUpperCase(), reason: `コミットメッセージのタグ [qa:${tagMatch[1].toUpperCase()}]` };
 
-    if (l3hits.length > 0) {
-      level = "L3";
-      reason = `セキュリティ敏感パスに変更: ${l3hits.slice(0, 5).join(", ")}${l3hits.length > 5 ? ` 他${l3hits.length - 5}件` : ""}`;
-    } else if (nonContent.length === 0) {
-      level = "L0";
-      reason = `コンテンツ/データのみの変更 (${files.length}ファイル)`;
-    } else if (l2hits.length > 0) {
-      level = "L2";
-      reason = `全ページ波及パスに変更: ${l2hits.slice(0, 5).join(", ")}`;
+if (DEPLOYED_BASE === "unknown") {
+  // 本番の検証済みコミットの記録が無い = 何が本番に出ていないか分からない → 全部検査
+  mode = "deployed-unknown";
+  level = "L3";
+  reason = "本番の検証済みコミットの記録が無いため、本番に出ていない変更が分からず L3 (検証を通ったデプロイで記録される)";
+  othersPending = true;
+} else if (DEPLOYED_BASE) {
+  try {
+    const headIsOld = DEPLOYED_BASE !== HEAD && gitOk(["merge-base", "--is-ancestor", HEAD, DEPLOYED_BASE]);
+    if (headIsOld) {
+      // head は本番より古い(古い実行の Re-run 等)= main の先頭ではないのでデプロイされない。従来の判定のまま
+      mode = "push";
     } else {
-      const t = policy.thresholds;
-      if (files.length <= t.l1_max_files && totalLines <= t.l1_max_lines) {
-        level = "L1";
-        reason = `軽微なコード変更 (${files.length}ファイル / ${totalLines}行 ≤ ${t.l1_max_files}ファイル / ${t.l1_max_lines}行)`;
-      } else {
-        level = "L2";
-        reason = `中規模以上のコード変更 (${files.length}ファイル / ${totalLines}行)`;
-      }
+      mode = "deployed";
+      ({ files, lines: totalLines } = diffStats(DEPLOYED_BASE, HEAD, true));
+      // ほかの push の未検証の変更があるか: 本番のツリーと「直前の push」のツリーが違えばある。
+      // 手動実行(BASE 無し)は自分の変更という区別が無いので、本番との差があれば「ある」。
+      // 本番と head の中身が同じ(デプロイ済みの先頭の再実行等)なら、本番に出ていない変更は何も無い
+      othersPending = files.length > 0 && (BASE ? !gitOk(["diff", "--quiet", DEPLOYED_BASE, BASE]) : true);
     }
+  } catch (e) {
+    console.error(`ERROR: 本番の検証済みコミット(${DEPLOYED_BASE})との差分の取得に失敗: ${e.message}`);
+    console.error("安全側に倒して L3 とします。");
+    mode = "deployed-error";
+    level = "L3";
+    reason = `本番の検証済みコミット ${DEPLOYED_BASE.slice(0, 7)} との差分を取得できず安全側で L3`;
+    othersPending = true;
   }
+}
+if (mode === "push" || mode === "head-commit") {
+  try {
+    ({ files, lines: totalLines } = diffStats(BASE, HEAD, false));
+  } catch (e) {
+    console.error(`ERROR: git 差分の取得に失敗 (base=${BASE || "(none)"}, head=${HEAD}): ${e.message}`);
+    console.error("安全側に倒して L2 とします。");
+  }
+}
+
+if (!level) {
+  const auto = autoLevel(files, totalLines);
+  if (mode === "deployed" && files.length === 0) {
+    auto.reason = "本番の検証済みコミットと中身が同じ(再ビルド)のため安全側で L2";
+  }
+  if (manual && !othersPending) {
+    // 自分の push の変更しか無い: 従来どおり手動指定がそのまま効く(下げにも効く)
+    ({ level, reason } = manual);
+  } else if (manual) {
+    // ほかの push の未検証の変更を含む: 手動指定は上げるのにだけ効く
+    if (rank(manual.level) >= rank(auto.level)) ({ level, reason } = manual);
+    else {
+      level = auto.level;
+      reason = `${auto.reason} (${manual.reason} は、ほかの push の未検証の変更を含むため引き下げに使えない)`;
+    }
+  } else {
+    ({ level, reason } = auto);
+  }
+} else if (manual && rank(manual.level) > rank(level)) {
+  ({ level, reason } = manual);
+}
+if (mode === "deployed") {
+  reason = `本番の検証済み ${DEPLOYED_BASE.slice(0, 7)} からの差分で判定${othersPending ? "(ほかの push の未検証の変更を含む)" : ""}: ${reason}`;
 }
 
 // ---------- レベル → 実行ジョブ ----------
@@ -194,7 +256,7 @@ const jobs = {
   needs_approval: n >= 3,
 };
 
-const result = { level, reason, files: files.length, lines: totalLines, ...jobs };
+const result = { level, reason, files: files.length, lines: totalLines, base_mode: mode, deployed_base: DEPLOYED_BASE, others_pending: othersPending, ...jobs };
 
 // ---------- 出力 ----------
 if (process.env.GITHUB_OUTPUT) {

@@ -19,16 +19,57 @@ push / PR
    └─ L3 セキュリティ敏感(認証・決済・DB・依存) → + SAST / 依存脆弱性 / 🙋レン承認
    │
    ▼
-[qa-gate] 全ジョブ成功で通過 → [deploy] wrangler deploy → [post-deploy] 本番スモーク+ヘッダ検査
+[qa-gate] 全ジョブ成功で通過 → [deploy] main の先頭のときだけ wrangler deploy → [post-deploy] 本番スモーク+ヘッダ検査
                                                               ├ 失敗時: 30秒間隔で最大3回リトライ
                                                               │  (エッジ伝播前の旧レスポンス誤検知を防止)
-                                                              └ それでも失敗: Issue自動起票(ロールバック提案)
+                                                              ├ それでも失敗: Issue自動起票(ロールバック提案)
+                                                              └ 通過: ブランチ qa-deployed を今回のコミットへ進める
+                                                                 (= 次の判定の基準。下の「デプロイの安全装置」)
 毎週月曜 09:00 JST
    └─ [security-weekly] 依存CVE / 本番ヘッダ / 全ページリンク切れ / (portalのみ)ZAP DAST → 問題あればIssue起票
 ```
 
 判定を上書きしたいとき: コミットメッセージに `[qa:L0]`〜`[qa:L3]` を書くか、
 Actions タブ → workflow_dispatch の `level_override`。
+本番基準モードのサイトでは、ほかの push の未検証の変更が含まれるとき、上書きは**上げるのにだけ**効く。
+
+## デプロイの安全装置(順番の守り + 本番基準モード)
+
+QA の重さは変更ごとに違う(L0 約2分・L3 約10分)。同じサイトに続けて push すると、
+**後から来た軽い実行が先に終わり、検査中・検査で落ちた前の変更ごと本番に出る**
+(過去2か月で5件。検査で落ちたまま出た3件+検査完了前に出た2件。docs/qa-policy.md §2-2)。
+これを2つの仕組みで防ぐ(2026-10-08 レン決定。2つで1組なので片方だけ外さない):
+
+| 仕組み | どこ | 何をする |
+|---|---|---|
+| 順番の守り | 各サイトの deploy ジョブ | デプロイ直前に main の先頭を確かめ、先頭でない実行はデプロイを飛ばす(古いビルドで本番を戻さない) |
+| 本番基準モード | qa.yml の `deployed_ref` + post-deploy.yml の `mark_deployed_ref` | 検査の重さを「直前の push からの差分」ではなく「本番に出て検証を通った最新のコミット(ブランチ `qa-deployed`)からの差分」で決める。検証が通ると post-deploy が `qa-deployed` を進める |
+
+結果として、main の先頭の実行は「本番にまだ出ていない変更すべて」を必要な重さで検査してからデプロイする。
+
+**運用で変わること(ロビ・各セッション向け)**
+- L2/L3 の実行中に別の push を積んでも安全(積んだ側の実行が自動で重い検査になる)。
+  ただし重い検査が2回走って分数を食うので、急がない push はまとめる
+- **L3 が落ちたら、直すか revert を最優先**。直すか戻すまで、後ろに積んだ記事・データの更新も本番に出ない
+  (落ちた変更を revert すれば本番との差が消えるので、検査は軽い方に戻る)
+- `qa-deployed` ブランチは手で動かさない・消さない(手で進めると検査が抜ける。消した場合は次の実行が
+  L3 で全部検査し、検証が通ったデプロイで自動的に作り直される)
+- 古い実行の Re-run はデプロイしない(順番の守り)。ロールバックは revert して push
+- L3 が落ちた後の小修正を `gh run cancel` → `level_override=L3` で通し直す手順(2026-10-03)は不要
+- 本番にまだ出ていない(検証待ちの)コミットの確認:
+  `git fetch origin && git log --oneline origin/qa-deployed..origin/main`
+
+**導入状況**
+| サイト | 順番の守り | 本番基準モード |
+|---|---|---|
+| 個室サウナナビ(portal-sauna) | ✅ 2026-10-07 | 本番で検証中(2026-10-08) |
+| KAZOERU / リフォーム相場ナビ / 塗装相場ナビ | 準備済み・未導入 | 未導入 |
+| 実家じまい案内所 | caller 未導入 | caller 未導入 |
+
+Node の3サイトは、L3 が依存の既知脆弱性(OSV / npm audit)で通らない間は導入しない
+(導入コミット自体が L3 で、本番基準モードは L3 が通るまで後続の push も止めるため)。
+L3 が緑になったら、順番の守りと同じ push に `deployed_ref` / `mark_deployed_ref` / post-deploy の
+`permissions` を載せる(templates/caller-media-qa-deploy.yml が完成形)。
 
 ## リポジトリ構成
 
@@ -37,7 +78,8 @@ Actions タブ → workflow_dispatch の `level_override`。
 | `.github/workflows/qa.yml` | 本体: 判定→レベル別実行 (reusable) |
 | `.github/workflows/post-deploy.yml` | デプロイ直後の本番検証 (reusable) |
 | `.github/workflows/security-weekly.yml` | 週次セキュリティスキャン (reusable) |
-| `scripts/classify-release.mjs` | QAレベル判定エンジン(依存ゼロ) |
+| `scripts/classify-release.mjs` | QAレベル判定エンジン(依存ゼロ)。`--deployed-base` で本番基準モード |
+| `scripts/classify-release.test.mjs` | 判定エンジンの自己テスト(`npm test`。使い捨ての git リポジトリで場面ごとに確かめる) |
 | `scripts/check-headers.mjs` | セキュリティヘッダ検査(OWASP準拠)。`--retries` でリトライ可 |
 | `scripts/smoke-check.mjs` | HTTP生存確認。`--retries` でリトライ可 |
 | `scripts/e2e-smoke.spec.mjs` | 共通E2Eスモーク(サイト側テストコード不要) |
@@ -49,6 +91,8 @@ Actions タブ → workflow_dispatch の `level_override`。
 
 1. `templates/caller-media-qa-deploy.yml`(ポータルは `caller-portal-qa-deploy.yml`)を
    サイトリポジトリの `.github/workflows/qa-deploy.yml` にコピー
+   (順番の守り・本番基準モード入り。`qa-deployed` ブランチは最初の検証済みデプロイで自動的に作られる。
+   それまでの実行は記録が無いので L3 になる=導入コミットの L3 が通ることが前提)
 2. `templates/caller-weekly.yml` を `.github/workflows/weekly.yml` にコピー
 3. `<OWNER>` を Organization 名に、`<YOUR-DOMAIN>` を本番ドメインに置換
 4. `smoke_paths` を主要ページ(トップ+テンプレート種別ごとに1ページ)に設定
@@ -93,6 +137,14 @@ Actions タブ → workflow_dispatch の `level_override`。
 ```bash
 # リリース前にQAレベルを予測
 node scripts/classify-release.mjs --base origin/main --head HEAD --cwd /path/to/site
+
+# 本番基準モードのサイトは、CI と同じく本番の検証済みコミットからの差分で予測する
+git -C /path/to/site fetch origin
+node scripts/classify-release.mjs --base origin/main --head HEAD --cwd /path/to/site \
+  --deployed-base "$(git -C /path/to/site rev-parse origin/qa-deployed)"
+
+# 判定エンジンを触ったら自己テスト
+npm test
 
 # 本番のヘッダ・生存確認
 node scripts/check-headers.mjs --url https://example.com --profile static

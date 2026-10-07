@@ -55,6 +55,14 @@ on:
         required: false
         default: ""
         type: string
+      deployed_ref:
+        description: >-
+          本番基準モード: 本番に出て post-deploy の検証を通った最新のコミットを指すブランチ名 (例: qa-deployed)。
+          指定すると main への push・手動実行の判定を「直前の push からの差分」ではなく「このブランチからの差分」
+          (= 本番が実際に変わる中身)で行う。post-deploy.yml の mark_deployed_ref と同じ名前にする。空なら従来どおり
+        required: false
+        default: ""
+        type: string
       qa_standard_ref:
         required: false
         default: "main"
@@ -96,22 +104,65 @@ jobs:
           path: .qa-standard
       - name: Classify release
         id: run
+        # 入力・イベントの値は env 経由で渡す(run: に直接埋め込むと、値の中の記号がシェルとして解釈される)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          LEVEL_OVERRIDE: ${{ inputs.level_override }}
+          DEPLOYED_REF: ${{ inputs.deployed_ref }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE="${{ github.event.pull_request.base.sha }}"
-          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] && [ -n "${{ github.event.before }}" ]; then
-            BASE="${{ github.event.before }}"
+          DEPLOYED_BASE=""
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BASE="$PR_BASE_SHA"
           else
-            BASE=""  # 初回 push 等: classify 側が安全側 (L2) に倒す
+            if [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ] && [ -n "$PUSH_BEFORE" ]; then
+              BASE="$PUSH_BEFORE"
+            else
+              BASE=""  # 初回 push・手動実行: classify は head のコミットだけを見る(本番基準モードなら本番からの差分)
+            fi
+            # 本番基準モード: 本番に出て検証を通った最新のコミット(ブランチ $DEPLOYED_REF)からの差分で判定する。
+            # L3 の実行中に積まれた L0 の push や、落ちた変更の後の小さな修正が、未検査の変更ごと
+            # 低いレベルでデプロイされる穴を塞ぐ(2026-10-08 レン決定。docs/qa-policy.md §2-2)
+            if [ -n "$DEPLOYED_REF" ]; then
+              if ! printf '%s' "$DEPLOYED_REF" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+                echo "::error::deployed_ref の名前が不正: $DEPLOYED_REF"
+                exit 1
+              fi
+              set +e
+              git ls-remote --exit-code origin "refs/heads/$DEPLOYED_REF" >/dev/null
+              rc=$?
+              set -e
+              if [ "$rc" -eq 0 ]; then
+                git fetch --no-tags origin "+refs/heads/$DEPLOYED_REF:refs/remotes/origin/$DEPLOYED_REF"
+                DEPLOYED_BASE=$(git rev-parse "refs/remotes/origin/$DEPLOYED_REF")
+              elif [ "$rc" -eq 2 ]; then
+                # 記録がまだ無い(導入直後・ブランチ削除): 何が本番に出ていないか分からないので classify が L3 に倒す。
+                # 検証を通ったデプロイで post-deploy が自動的に作る
+                DEPLOYED_BASE="unknown"
+                echo "::warning title=本番の検証済みコミットの記録が無い::ブランチ $DEPLOYED_REF が無いため全部検査(L3)する。検証を通ったデプロイで自動的に作られる"
+              else
+                echo "::error::ブランチ $DEPLOYED_REF の確認に失敗(rc=$rc)。判定の基準を決められないため止めた(Re-run で再実行する)"
+                exit 1
+              fi
+            fi
           fi
           node .qa-standard/scripts/classify-release.mjs \
-            --base "$BASE" --head "${{ github.sha }}" \
-            --override "${{ inputs.level_override }}"
+            --base "$BASE" --head "$HEAD_SHA" \
+            --override "$LEVEL_OVERRIDE" --deployed-base "$DEPLOYED_BASE"
       - name: Summary
+        env:
+          LEVEL: ${{ steps.run.outputs.level }}
+          REASON: ${{ steps.run.outputs.reason }}
+          DEPLOYED_REF: ${{ inputs.deployed_ref }}
         run: |
           {
-            echo "## QA レベル: ${{ steps.run.outputs.level }}"
-            echo "- 判定理由: ${{ steps.run.outputs.reason }}"
+            echo "## QA レベル: $LEVEL"
+            echo "- 判定理由: $REASON"
+            if [ -n "$DEPLOYED_REF" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
+              echo "- 判定の基準: 本番に出て検証を通った最新のコミット(ブランチ \`$DEPLOYED_REF\`)からの差分。ほかの push の未検証の変更が含まれるときは、タグ・level_override は上げるのにだけ効く"
+            fi
             echo "- 上書きしたい場合: コミットメッセージに \`[qa:L0]\`〜\`[qa:L3]\`、または workflow_dispatch の level_override"
           } >> "$GITHUB_STEP_SUMMARY"
 
