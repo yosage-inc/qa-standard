@@ -104,6 +104,7 @@ private リポジトリの Actions は月2,000分まで無料で、yosage-inc �
 | `config/` | Playwright / Lighthouse / ポリシー例 |
 | `templates/` | 各サイトに置く caller のコピー元 |
 | `docs/qa-policy.md` | QA標準書(出典つき・なぜこの構成か) |
+| `docs/test-quality-standard.md` | **テストの質の基準**(全事業共通の単一ソース。4つの柱・兆候チェック・ダブルの使い分け・変異プローブ。2026-10-19) |
 
 ## 新しいサイトへの導入手順(ロビの作業、1サイト約5分)
 
@@ -169,6 +170,9 @@ node scripts/classify-release.mjs --base origin/main --head HEAD --cwd /path/to/
 
 # 判定エンジンを触ったら自己テスト
 npm test
+
+# テストや検査器を足したら: docs/test-quality-standard.md §2 の兆候を自分で読み、
+# 本体を1か所壊して赤くなることを見てから push(§3-6。CI は中身を見ない)
 
 # 本番のヘッダ・生存確認
 node scripts/check-headers.mjs --url https://example.com --profile static
