@@ -574,9 +574,9 @@ test("B13 release-staging / restore-drill は S2+ で、doc は手順の節(rele
   for (const menu of [web, loadMenu(APP)]) {
     const lv = menu.base === "webqa" ? "S1" : "M1";
     const fr = find(buildMenu(menu, { level: lv, phase: "launch", traits: [] }), "flaky-rate");
-    assert.match(fr.note, /再実行の仕組みは無い/);
-    assert.match(fr.note, /対象なし\(再実行なし\)/);
-    assert.match(fr.evidence, /再実行したテスト名/);
+    assert.match(fr.note, /1 回だけ再実行/);
+    assert.match(fr.note, /走らなかった回/);
+    assert.match(fr.evidence, /FLAKY_TESTS/);
   }
   // appqa の fixed-ui-tests は実行係が叩ける実コマンド
   const fx1 = find(buildMenu(loadMenu(APP), { level: "M1", phase: "launch", traits: [] }), "fixed-ui-tests");
