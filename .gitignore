@@ -3,3 +3,6 @@ playwright-report/
 test-results/
 .lighthouseci/
 .DS_Store
+
+# 棚卸し台帳(QA の所見=非公開)は ~/yosage-appqa/ledger/ に置く。ここに残すのは手元用のシンボリックリンクだけ
+docs/test-audit-*
