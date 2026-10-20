@@ -7,7 +7,7 @@
  *
  * 判定順序(上が優先):
  *   1. --override / コミットメッセージの [qa:LN] タグ
- *   2. L3 パスに1つでも触れていれば L3 (セキュリティ敏感領域)
+ *   2. L3 パス(グロブ)か L3 の語(パスを語に分けて語頭一致)に1つでも触れていれば L3 (セキュリティ敏感領域)
  *   3. 全ファイルが L0 パス内なら L0 (コンテンツのみ)
  *   4. L2 パスに触れていれば L2 (テンプレート/レイアウト = 全ページ波及)
  *   5. 差分規模: しきい値以下なら L1、超えたら L2
@@ -48,7 +48,7 @@ const DEFAULT_POLICY = {
   version: 1,
   // L3: 認証・決済・セッション・DB・依存関係・CI・ヘッダ等、事故ったとき影響が最大の領域
   l3_paths: [
-    "**/auth/**", "**/*auth*", "**/login/**", "**/session*", "**/middleware*",
+    "**/auth/**", "**/login/**", "**/session*", "**/middleware*",
     "**/payment*", "**/billing*", "**/checkout*",
     "**/migrations/**", "**/*.sql", "**/schema*", "**/drizzle*",
     "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
@@ -57,6 +57,15 @@ const DEFAULT_POLICY = {
     ".github/**", "**/_headers", "**/headers*", "**/csp*", "**/*cookie*",
     ".env*", "**/secrets*",
   ],
+  // L3(語): パスを「語」に分け(英字以外と camelCase の山で区切り、小文字に)、どれかの語の先頭が stems に
+  //   一致すれば L3。except の語(完全一致)は数えない。グロブ "**/*auth*" の後継(2026-10-20):
+  //   author / authors(書き手)には当たらず、auth.ts / Auth.ts / login-auth.js / useAuth.ts / authorize.ts /
+  //   oauth.ts / unauthorized.ts には当たる。グロブは大小文字を見ないので camelCase の境界はグロブでは書けない。
+  //   語の分け方は yosage-appqa / yosage-webqa の judge_lib.sh と同じ(docs/2026-10-20-classify-auth-word-boundary.md)
+  l3_words: {
+    stems: ["auth", "oauth", "unauth"],
+    except: ["author", "authors", "authored", "authoring", "authorial", "authorship"],
+  },
   // L0: コンテンツ・データ・画像のみ = コードに触れない変更
   l0_paths: [
     "content/**", "posts/**", "articles/**", "data/**",
@@ -112,6 +121,22 @@ const matchers = Object.fromEntries(
 );
 const matches = (file, key) => matchers[key].some((re) => re.test(file));
 
+// ---------- 語の照合 (l3_words) ----------
+// パスを語に分ける: camelCase の山(小文字→大文字、大文字の連なり→大文字+小文字)で区切り、小文字にし、英字以外で区切る
+function pathWords(path) {
+  return path
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter(Boolean);
+}
+const wordRule = policy.l3_words || {};
+const wordStems = (wordRule.stems || []).map((s) => String(s).toLowerCase()).filter(Boolean);
+const wordExcept = new Set((wordRule.except || []).map((s) => String(s).toLowerCase()));
+// どれかの語が「except に無く、stems のどれかで始まる」なら該当
+const matchesWords = (file) => pathWords(file).some((w) => !wordExcept.has(w) && wordStems.some((s) => w.startsWith(s)));
+
 // ---------- git 差分 ----------
 function git(argv) {
   return execFileSync("git", argv, { cwd: CWD, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -142,7 +167,7 @@ function autoLevel(files, totalLines) {
   if (files.length === 0) {
     return { level: "L2", reason: "差分を取得できなかったため安全側で L2 (マージ/空コミットなら手動で [qa:L0] 指定可)" };
   }
-  const l3hits = files.filter((f) => matches(f, "l3_paths"));
+  const l3hits = files.filter((f) => matches(f, "l3_paths") || matchesWords(f));
   const nonContent = files.filter((f) => !matches(f, "l0_paths"));
   const l2hits = files.filter((f) => matches(f, "l2_paths"));
   if (l3hits.length > 0) {

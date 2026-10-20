@@ -91,6 +91,29 @@ try {
     ["--base", Y, "--head", Z, "--deployed-base", Z], "L0", "タグ [qa:L0]");
   expect("古い実行の Re-run(head が本番より古い)→ 従来の判定(この実行はデプロイしない)",
     ["--base", P0, "--head", X, "--deployed-base", Z], "L3");
+
+  // --- L3 の語の照合(2026-10-20): author(書き手)は L3 にしない。auth は語の位置・大小文字によらず L3 ---
+  // 1コミット1ファイルで積み、直前のコミットとの差分(従来モード)で判定する
+  let prev = R;
+  const one = (file, msg) => { write(file, `${msg}\n`); const sha = commit(msg); const args = ["--base", prev, "--head", sha]; prev = sha; return args; };
+  expect("authors(書き手)のコンテンツ → L0(旧グロブ **/*auth* では L3 だった)",
+    one("src/content/authors/taro.md", "著者データ"), "L0");
+  expect("data/authors.json → L0", one("data/authors.json", "著者一覧データ"), "L0");
+  expect("authors.js はコードだが auth ではない → L1", one("src/authors.js", "著者一覧の JS"), "L1");
+  expect("AuthorCard.js(camelCase の Author)→ L1", one("src/AuthorCard.js", "著者カード"), "L1");
+  expect("coauthor.js(auth が語の途中)→ L1", one("src/lib/coauthor.js", "共著者"), "L1");
+  expect("auth/ ディレクトリ → L3", one("src/auth/index.js", "認証"), "L3", "src/auth/index.js");
+  expect("Auth.js(大文字始まり)→ L3", one("src/Auth.js", "認証2"), "L3", "src/Auth.js");
+  expect("login-auth.js(- の後の auth)→ L3", one("scripts/login-auth.js", "ログイン認証"), "L3", "scripts/login-auth.js");
+  expect("LoginAuth.js(camelCase の境目の Auth)→ L3", one("src/LoginAuth.js", "ログイン認証2"), "L3", "src/LoginAuth.js");
+  expect("useAuth.js(小文字→大文字の山)→ L3", one("src/hooks/useAuth.js", "フック"), "L3", "src/hooks/useAuth.js");
+  expect("authorize.js(authoriz は書き手ではない)→ L3", one("src/lib/authorize.js", "認可"), "L3", "src/lib/authorize.js");
+  expect("authentication.js → L3", one("src/lib/authentication.js", "認証3"), "L3", "src/lib/authentication.js");
+  expect("oauth.js(語頭は o だが語幹を明示)→ L3", one("src/lib/oauth.js", "OAuth"), "L3", "src/lib/oauth.js");
+  expect("unauthorized.js → L3", one("src/pages/unauthorized.js", "401"), "L3", "src/pages/unauthorized.js");
+  // 全部大文字の例は既存の src/Auth.js と別の名前にする(大小文字を区別しないファイルシステムでは同じファイルになる)
+  expect("AUTHZ.JS(全部大文字)→ L3", one("src/api/AUTHZ.JS", "認可2"), "L3", "src/api/AUTHZ.JS");
+  expect("auth の語とコンテンツを同時に → L3(語が優先)", (() => { write("data/stores.csv", "d\n"); return one("src/lib/auth-utils.js", "混在"); })(), "L3", "src/lib/auth-utils.js");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

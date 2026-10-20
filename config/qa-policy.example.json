@@ -14,7 +14,7 @@
     "build.py", "**/build.py"
   ],
   "l3_paths": [
-    "**/auth/**", "**/*auth*", "**/login/**", "**/session*", "**/middleware*",
+    "**/auth/**", "**/login/**", "**/session*", "**/middleware*",
     "**/payment*", "**/billing*", "**/checkout*",
     "**/migrations/**", "**/*.sql", "**/schema*", "**/drizzle*",
     "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
@@ -23,6 +23,11 @@
     ".github/**", "**/_headers", "**/headers*", "**/csp*", "**/*cookie*",
     ".env*", "**/secrets*"
   ],
+  "l3_words": {
+    "$comment": "パスを語に分けて語頭一致。stems で始まる語があれば L3、except の語(完全一致)は数えない。旧 **/*auth* の後継(author(s) に当たらない)",
+    "stems": ["auth", "oauth", "unauth"],
+    "except": ["author", "authors", "authored", "authoring", "authorial", "authorship"]
+  },
   "thresholds": { "l1_max_files": 5, "l1_max_lines": 150 },
   "smoke_paths": ["/"]
 }
