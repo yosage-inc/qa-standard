@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "classify": "node scripts/classify-release.mjs",
-    "test": "node scripts/classify-release.test.mjs",
+    "test": "node scripts/classify-release.test.mjs && node scripts/qa-menu.test.mjs && node scripts/qa-metrics.test.mjs && bash scripts/drill-guard.test.sh",
+    "qa-menu": "node scripts/qa-menu.mjs",
     "check-headers": "node scripts/check-headers.mjs",
     "smoke": "node scripts/smoke-check.mjs"
   }

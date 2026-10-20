@@ -1,0 +1,148 @@
+{
+  "_readme": [
+    "欠陥埋め込み訓練(seeded-defect drill)の正解表の雛形。手順は ~/qa-standard/docs/seeded-defect-drill.md。",
+    "埋める係が作り、採点が終わるまで回す係(QA エージェント)に見せない(回す係のブリーフにこのファイルの中身・場所・件数・型を書かない)。採点係(メイン)が grading を埋める。",
+    "保存先は対象リポジトリの外(訓練中は scratchpad。採点後に各基盤の ledger/drills/<date>-<app>/answer-key.json へ移す)。",
+    "必須の欄: defects[].id / type / file / line / description / expected_item / severity。ほかは記録を楽にするための欄。",
+    "severity は各基盤の QA レポートの重要度(Web: Blocker/High/Medium/Low、モバイル: Blocker/Major/Minor)に合わせる。",
+    "expected_item は「<メニュー id>/<チェックリストの項目か手順書の行>」。メニュー id は各基盤の qa-menu.json の id。該当する項目が無ければ \"該当なし\"。",
+    "type_rotation は手順書 §5-2・§5-3 の筋を 1 本で写す: picked の型 = defects[] の type(mutation 以外)と一致 / 取り終えた位置までに飛ばした型は全部 skipped に理由つきで / 添字は 0 始まり。",
+    "random_candidates は §5-3 の列挙コマンドと出力をそのまま保存する欄(採点係が再現する)。この例では list を先頭 10 行で切っているが、実物は全行を入れる。",
+    "値はすべて例(ファイル名・行番号・候補の中身は 2026-10-20 の albu の見た目に寄せたが、実際の訓練では必ず取り直す)。秘密情報(鍵・パスワード)はこのファイルにも書かない。"
+  ],
+  "drill_no": 1,
+  "date": "2026-10-20",
+  "app": "albu",
+  "qa_base": "appqa",
+  "level": "M2",
+  "extra_items": [],
+  "extra_items_note": "この回はセキュリティ由来の型(手順書 §6 の表)を埋めていないので追加項目なし。埋めた回は例: [\"security-masvs/NETWORK(plaintext-http のため。手順書 §6)\"]",
+  "branch": "drill/2026-10-20-albu",
+  "base_commit": "abc1234(ledger/last-qa-albu.ref の値)",
+  "worktree": "<scratchpad>/drill-2026-10-20-albu",
+  "seeded_by": "埋める係(Sonnet サブエージェント)",
+  "judge_level_output": "M3(理由: albu/Core/VaultStore.swift が vault)— `judge_level.sh --repo <worktree> --base abc1234` の出力。判定器が埋め込みのパスに反応した事実を残す。訓練は M2 で回す(引き下げではない。手順書 §6)",
+  "type_rotation": {
+    "rule": "手順書 §5-2。開始位置 = ((drill_no − 1) × 4) mod 13(0 始まり。0 = #1)。型の一覧の順に取り、取る件数 = その回の件数 − ランダム相当の件数。該当しない型は飛ばして skipped に理由を書く(取り終えた位置より後ろは書かない)",
+    "start_index": 0,
+    "count_from_list": 3,
+    "count_random": 2,
+    "picked": ["fail-open-detector", "float-boundary", "numeric-input-fullwidth-decimal"],
+    "skipped": [
+      { "type": "tenant-id-200", "list_no": 3, "reason": "iOS 単体アプリにテナントが無い(基盤 = Web のみ)" }
+    ],
+    "random_candidates": {
+      "rule": "手順書 §5-3。演算子 = 添字 (n + k) mod 4(0=compare-invert, 1=return-fixed, 2=branch-delete, 3=constant-plusminus-1)、対象 = 候補の添字 (n × 7 + k) mod N。どちらも 0 始まり",
+      "cmd": "git -C <worktree> grep -nE '^[[:space:]]*(if|guard|while|case|return)[[:space:]].*(<=|>=|==|!=|<|>)' -- '*.swift' ':!*Tests*' ':!*UITests*' | head -200",
+      "count": 46,
+      "list": [
+        "albu/Core/Crypto.swift:40:        guard a.count == b.count else { return false }",
+        "albu/Core/Crypto.swift:43:        return diff == 0",
+        "albu/Core/Models.swift:59:        guard let duration, duration > 0 else { return nil }",
+        "albu/Core/PurchaseStore.swift:39:        if product == nil {",
+        "albu/Core/VaultStore.swift:79:        return remain > 0 ? remain : nil",
+        "albu/Core/VaultStore.swift:84:        guard failCount >= lockoutThreshold else { return nil }",
+        "albu/Core/VaultStore.swift:92:        guard lockoutRemaining == nil else { return nil }",
+        "albu/Core/VaultStore.swift:125:        return verify(pin: pin) != nil ? .inUse : .available",
+        "albu/Core/VaultStore.swift:130:        guard index.failCount != nil || index.lockUntil != nil else { return }",
+        "albu/Core/VaultStore.swift:139:        guard verify(pin: pin) == nil else { throw VaultError.pinInUse }"
+      ],
+      "note": "例では list を先頭 10 行で切っている(実物は 46 行全部)。200 行を超えたら先頭 200 行だけを候補にし、超えたことをここに書く"
+    }
+  },
+  "defects": [
+    {
+      "id": "D1",
+      "type": "fail-open-detector",
+      "origin": "menu",
+      "mutation_operator": null,
+      "file": "albuTests/CryptoTests.swift",
+      "line": 58,
+      "commit": "1111111",
+      "description": "暗号化後のデータが平文を含まないことを確かめるアサーションを、常に真になる形(XCTAssertNotNil)に置き換えた。本体を壊しても緑のまま。既存テスト: 緑(赤 0 件)",
+      "expected_item": "test-diff-review/B6(発火し得ない検出器)",
+      "severity": "Major",
+      "grading": { "found": null, "report_ref": null, "severity_reported": null, "note": null }
+    },
+    {
+      "id": "D2",
+      "type": "float-boundary",
+      "origin": "menu",
+      "mutation_operator": null,
+      "file": "albu/Core/VaultStore.swift",
+      "line": 79,
+      "commit": "2222222",
+      "description": "ロック残り秒数の判定を Double の `remain > 0` から `remain >= 0` に変え、ちょうど 0.0 の瞬間も「ロック中」と表示される(境界ちょうどが 1 段ずれる)。既存テスト: 緑(赤 0 件。境界ちょうどのテストが無い)",
+      "expected_item": "flows-regression/ロックアウトの境界行(ちょうど・±1)、test-diff-review/B7",
+      "severity": "Minor",
+      "grading": { "found": null, "report_ref": null, "severity_reported": null, "note": null }
+    },
+    {
+      "id": "D3",
+      "type": "numeric-input-fullwidth-decimal",
+      "origin": "menu",
+      "mutation_operator": null,
+      "file": "albu/UI/PinEntryView.swift",
+      "line": 44,
+      "commit": "3333333",
+      "description": "PIN 入力の全角→半角の正規化を外し、全角数字「１２３４」で解錠できない(かな入力・日本語キーボードで起きる)。既存テスト: 緑(赤 0 件。UI 層にテストが無い)",
+      "expected_item": "flows-regression/同値分割の行(全角・空・桁あふれ)、test-diff-review/B8",
+      "severity": "Major",
+      "grading": { "found": null, "report_ref": null, "severity_reported": null, "note": null }
+    },
+    {
+      "id": "D4",
+      "type": "mutation",
+      "origin": "random",
+      "mutation_operator": "return-fixed",
+      "file": "albu/Core/VaultStore.swift",
+      "line": 125,
+      "commit": "4444444",
+      "description": "k=0: 演算子 添字 (1+0) mod 4 = 1(return-fixed)、対象 候補 46 行中 添字 (1×7+0) mod 46 = 7(0 始まり)= VaultStore.swift:125。PIN の使用中判定の戻り値を常に .available に固定(同じ PIN で 2 冊目が作れる)。既存テスト: 赤 1 件(LockoutTests は緑、PIN 重複のテストがあれば赤)",
+      "expected_item": "build-test/該当テストが赤(あれば)。無ければ flows-regression/同じ PIN で 2 冊目を作れない行",
+      "severity": "Major",
+      "grading": { "found": null, "report_ref": null, "severity_reported": null, "note": null }
+    },
+    {
+      "id": "D5",
+      "type": "mutation",
+      "origin": "random",
+      "mutation_operator": "branch-delete",
+      "file": "albu/Core/VaultStore.swift",
+      "line": 139,
+      "commit": "5555555",
+      "description": "k=1: 演算子 添字 (1+1) mod 4 = 2(branch-delete)、対象 候補 46 行中 添字 (1×7+1) mod 46 = 8(0 始まり)= VaultStore.swift:130 は早期 return の guard で、消しても振る舞いが変わらない(適用不可)ので添字 9 = VaultStore.swift:139 へ 1 つずらした(手順書 §5-3-3)。作成時の `guard verify(pin:) == nil else { throw .pinInUse }` を削除(重複 PIN の拒否が消える)。既存テスト: 赤 0 件",
+      "expected_item": "flows-regression/同じ PIN で 2 冊目を作れない行、mutation-probe(判断の変更にテストが無い)",
+      "severity": "Blocker",
+      "grading": { "found": null, "report_ref": null, "severity_reported": null, "note": null }
+    }
+  ],
+  "decoys": [
+    {
+      "id": "X1",
+      "file": "albu/UI/SettingsView.swift",
+      "line": 12,
+      "commit": "6666666",
+      "description": "振る舞いを変えない変数名の変更(誤報の計測用。指摘されたら誤報に数える)。コミット前に既存テスト全部緑を確認"
+    }
+  ],
+  "grading_summary": {
+    "seeded": 5,
+    "green_on_existing_tests": 4,
+    "found": null,
+    "ddp": null,
+    "found_by_type": {},
+    "missed_types": [],
+    "severity_mismatch": [],
+    "false_alarms": null,
+    "bonus_found": null,
+    "minutes_qa": null,
+    "minutes_total": null,
+    "unperformed_items": [],
+    "ledger_untouched": { "last_qa_ref": null, "qa_log": null, "note": "採点時に ledger/last-qa-<app>.ref が base_commit のまま・qa-log.jsonl に訓練の行が無いことを確認して true/false を書く(手順書 §8-4)" },
+    "graded_by": "採点係(メイン)",
+    "graded_at": null,
+    "note": null,
+    "report": "ledger/drills/2026-10-20-albu/report.md"
+  }
+}
