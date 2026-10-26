@@ -50,10 +50,11 @@
 
 1. 基準点 = `ledger/last-qa-<app>.ref` のコミット(無ければ main の先頭)。基準点から枝を切ると、QA の差分 = 埋めた変更だけになる。
 2. 作業ツリーは**使い捨ての worktree**。開発セッションの作業ツリー・枝には触らない(変異プローブと同じ作法。test-quality-standard §4-2)。
+   **置き場所は一時領域(scratchpad・/tmp)にしない**(2026-10-27 改訂): 訓練 #1 で QA 実行中に Mac の時計が 6 日飛び、一時領域の掃除で worktree と正解表が消えた。`~/.qa-drills/<基盤>/drill-<日付>-<app>` のように消えない場所に作る。
    ```bash
    REPO=~/yosage-apps/albu; APP=albu; DATE=2026-10-20
    BASE=$(cat ~/yosage-appqa/ledger/last-qa-$APP.ref)
-   git -C "$REPO" worktree add -b "drill/$DATE-$APP" "<scratchpad>/drill-$DATE-$APP" "$BASE"
+   mkdir -p ~/.qa-drills/appqa && git -C "$REPO" worktree add -b "drill/$DATE-$APP" ~/.qa-drills/appqa/drill-$DATE-$APP "$BASE"
    ```
    Node のアプリは `node_modules` をシンボリックリンクで共有してよい。Xcode は `project.yml` があれば `xcodegen generate`。
 3. 枝名は **`drill/<日付>-<app>`**(例 `drill/2026-10-20-albu`)。コミットメッセージは **`[seeded-defect] drill <回数番号> #<連番>`** だけにする
@@ -239,8 +240,8 @@ test-quality-standard §4-2 の 4 種。正解表の `type` は `mutation`、`mu
 
 - 雛形: `templates/drill-answer-key.example.json`。必須の欄は `defects[]` の `id` / `type` / `file` / `line` / `description` / `expected_item` / `severity`。
   `expected_item` は「`<メニュー id>/<チェックリストの項目か手順書の行>`」。拾う項目が無ければ `"該当なし"`(それ自体が §12 の材料)。
-- 置き場所: **訓練中は scratchpad**(対象リポジトリの外。回す係のセッションから見えない所)。採点後に
-  各基盤の `ledger/drills/<日付>-<app>/answer-key.json` へ移す(レポートと同じ場所。QA の所見なので非公開の ledger 側に置く)。
+- 置き場所: **最初から各基盤の `ledger/drills/<日付>-<app>/answer-key.json`**(対象リポジトリの外・消えない場所。2026-10-27 改訂: 一時領域に置いた訓練 #1 の正解表が消え、コミットの diff から復元する羽目になった)。
+  回す係には場所を教えず、エージェント定義で「訓練では正解表を見ない」と定めている。QA の所見なので非公開の ledger 側に置く。
 - 秘密情報を書かない(§5-5)。
 
 ### 9-2. 台帳 `ledger/drills.jsonl`(基盤ごと・1 回の訓練 = 1 行)
@@ -264,7 +265,7 @@ test-quality-standard §4-2 の 4 種。正解表の `type` は `mutation`、`mu
 
 ```bash
 REPO=~/yosage-apps/albu; APP=albu; DATE=2026-10-20
-git -C "$REPO" worktree remove --force "<scratchpad>/drill-$DATE-$APP"
+git -C "$REPO" worktree remove --force ~/.qa-drills/appqa/drill-$DATE-$APP
 git -C "$REPO" branch -D "drill/$DATE-$APP"
 git -C "$REPO" worktree prune
 # 確認(4 つとも「本体だけ/空」であること。出力を採点の記録に貼る)
@@ -390,6 +391,9 @@ DRILL_GUARD_HOOK=<壊したコピー> ~/qa-standard/scripts/drill-guard.test.sh 
 
 ## 14. 黙って落とさない・限界
 
+- **一時領域は消える**(訓練 #1・2026-10-20〜27 の実例): QA が日をまたぐと scratchpad/tmp の掃除で worktree・正解表が消える。worktree は `~/.qa-drills/`、正解表は `ledger/drills/` に最初から置く(§3・§9-1)。消えた場合でも、埋め込みは枝のコミットに残るので diff から復元できる(正解表の復元版にはその旨を書く)。
+- **認可マトリクスは読み取りの行だけでは書き込みの越境を拾えない**(訓練 #1 の `tenant-id-200`: WHERE 抜けの UPDATE は 110 行すべて緑のまま、saas-core の実打鍵で見つかった)。書き込み API のあとに他テナントの状態が不変であることを見る行を足す(daicho は flows の M28 候補)。
+
 - 実施しなかった項目(時間上限・環境)は回す係が「未実施(理由)」と書き、採点係は `unperformed_items` に残す。
 - 埋められなかった型(基盤に該当なし・適用できる箇所が無い)は `type_rotation.skipped` に理由つきで残す。
 - 後始末の確認が取れていなければ `cleanup_verified: false` のまま台帳に残す。
@@ -415,3 +419,4 @@ DRILL_GUARD_HOOK=<壊したコピー> ~/qa-standard/scripts/drill-guard.test.sh 
   型を取る件数と skipped の書き方(§5-2)/ `security-web` を ASVS 5.0 の現行 ID に(§4 #9・§6)/ `double-booking` は `saas-core`/T-6(§4 #12)/
   judge_level は `--base` 必須・メニュー出力を依頼文に添付・「引き下げではない」の言い直し(§6・§7)/ qa.config の場所と daicho の初回前準備(§6・§11)/
   qa-log・last-qa ref を動かさない指示と採点時の確認(§7・§8)/ 暫定・自社基準の明記(§5-4・§8)。
+- 2026-10-27 訓練 #1(daicho・S2)の教訓を反映: worktree と正解表を一時領域に置かない(§3・§9-1・§10)、§14 に 2 件追記
