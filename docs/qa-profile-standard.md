@@ -116,7 +116,7 @@ QA の重さは **レベル(変更の大きさ・危険度)× フェーズ(事�
 
 | 穴 | 埋める項目 | 置き場所 |
 |---|---|---|
-| 本番の異常に気づく仕組みがない(**運用**) | 日次の確認手順は運用側 `~/yosage-infra/runbooks/prod-monitoring.md`(既存の日次チェックへの相乗りはレン判断)。QA は `prod-monitor` で「回っているか」を確認するだけ | `~/yosage-infra/` |
+| 本番の異常に気づく仕組みがない(**運用**) | 日次の確認手順は運用側 `~/yosage-infra/runbooks/prod-monitoring.md`(2026-10-27 レン決定: 既存の朝の日次チェック `yosage-daily-inquiry` に相乗り、`launch` 以上のアプリが出たら有効化)。QA は `prod-monitor` で「回っているか」を確認するだけ | `~/yosage-infra/` |
 | 設計段階の脅威分析がない(開発・QA) | `threat-model`(15 分・6 問) | `~/yosage-webqa/templates/threat-model.md` |
 | 漏洩時の対応手順がない(**運用・法務**。個人情報保護委員会への報告・本人通知の義務) | 手順書・連絡先・年 1 回の机上訓練は四半期の法務チェックの管轄 `~/yosage-legal/incident-response.md`。QA は `breach-runbook` で「存在し 1 年以内に見直されているか」を確認するだけ(ストア提出前のフィードバック窓口の確認と同じ型) | `~/yosage-legal/` |
 | 攻撃者目線で外から叩く検査が弱い | `attacker-charter`・`api-fuzz`・`dual-judge`、`dep-alerts`(Dependabot alerts は private リポジトリで全部オフ=レン判断で有効化) | 各基盤の qa-levels / checklists |
