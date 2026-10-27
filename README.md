@@ -134,7 +134,7 @@ private リポジトリの Actions は月2,000分まで無料で、yosage-inc �
 - [ ] **qa-standard リポジトリの Settings → Actions → General → Access を
   「Accessible from repositories in the organization」に変更**
   (デフォルトは Not accessible。これを忘れると全サイトの QA が起動できない — GitHub 公式仕様)
-- [ ] Organization 設定 → Code security → Dependabot alerts / security updates を全リポジトリで有効化(無料)
+- [x] Dependabot alerts を非公開リポジトリ 11 本で有効化(2026-10-27・ロビが API で・0円)。security updates(自動修正 PR)は、その PR に QA が走って Actions の分数を使うのでオフのまま(予算 0 円)。有効化はリポジトリごとなので、新しいリポジトリは作った時に個別に有効化する
 - [ ] GitHub と Cloudflare のアカウントで 2FA を有効化
   (個人情報保護法の技術的安全管理措置②「アクセス者の識別と認証」に対応)
 

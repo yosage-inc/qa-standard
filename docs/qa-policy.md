@@ -336,7 +336,7 @@ Google 公式の閾値(75パーセンタイル評価、[web.dev/vitals](https://
 | TruffleHog OSS | secrets | **全レベル・毎push** | Apache-2.0、無制限 |
 | Semgrep CE (`semgrep/semgrep` Docker) | SAST | L3 + 必要時 | CLI は LGPL-2.1 で無制限無料(Platform 未登録運用) |
 | osv-scanner + npm audit | SCA | L3 + 週次 | Apache-2.0 / npm 標準 |
-| Dependabot (alerts + security updates) | SCA | 常時(GitHub 側) | 全プラン無料([GitHub Docs](https://docs.github.com/en/code-security/getting-started/github-security-features)) |
+| Dependabot alerts | SCA | 常時(GitHub 側。2026-10-27〜 非公開リポジトリ 11 本で有効。security updates=自動修正 PR はオフ: その PR に QA が走って Actions の分数を使う) | 全プラン無料([GitHub Docs](https://docs.github.com/en/code-security/getting-started/github-security-features)) |
 | OWASP ZAP baseline | DAST | 週次(portal のみ、本番URL) | Apache-2.0。baseline は非攻撃で「本番への実行も想定内」と公式明記([ZAP Docs](https://www.zaproxy.org/docs/docker/baseline-scan/)) |
 
 **選定で避けたもの(理由つき)**:

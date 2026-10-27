@@ -27,7 +27,7 @@
 
 ```bash
 cd ~/qa-standard
-# 基盤ごとに 1 回ずつ。期間は前の見直し日の翌日から当日まで(初回 2027-02-05 は --since を付けず台帳の最初から)
+# 基盤ごとに 1 回ずつ。期間は前の見直し日の翌日から当日まで(初回 2026-11-05 は --since を付けず台帳の最初から)
 node scripts/qa-metrics.mjs --ledger ~/yosage-webqa/ledger --menu ~/yosage-webqa/qa-menu.json --since <前回の翌日> --until <当日>
 node scripts/qa-metrics.mjs --ledger ~/yosage-appqa/ledger --menu ~/yosage-appqa/qa-menu.json --since <前回の翌日> --until <当日>
 # 傾向を見るときは --since を付けずに全期間でも出す(数字は目標にしない。§3)
@@ -62,7 +62,7 @@ node scripts/qa-metrics.mjs --ledger ~/yosage-appqa/ledger --menu ~/yosage-appqa
 { "id": "a11y-web", "status": "fail", "frequency": "every",
   "history": [
     { "date": "2026-10-20", "change": "所見で導入" },
-    { "date": "2027-02-05", "change": "昇格 warn→fail(直近3回 誤検出0。四半期見直し)" }
+    { "date": "2026-11-05", "change": "昇格 warn→fail(直近3回 誤検出0。四半期見直し)" }
   ] }
 ```
 
@@ -172,5 +172,6 @@ QA の数字は経営の数字ではないので、噛み砕いて短く。形�
 
 ## 6. 改訂
 
-- 2026-10-20 制定。初回の見直しは 2027-02-05。`qa-metrics.mjs` の自己テスト(`scripts/qa-metrics.test.mjs`)は合成の台帳で DDP・変更失敗率・不安定率・各候補・欠損を確かめ、壊して赤を見てから置いた。
+- 2026-10-20 制定。初回の見直しは当初 2027-02-05 とした(2026-10-27 に 2026-11-05 へ前倒し=最後の行)。`qa-metrics.mjs` の自己テスト(`scripts/qa-metrics.test.mjs`)は合成の台帳で DDP・変更失敗率・不安定率・各候補・欠損を確かめ、壊して赤を見てから置いた。
 - 2026-10-20 レビュー反映(同日): §1 に起動元(定期タスク新設・未作成)/ §2-1・§2-2・§2-4 に訓練(`drills.jsonl`)/ §2-2 昇格行に「扱い」列の人の確認、`--menu` 時は `warn` / `promoting` だけ候補 / §2-3 に status 6 種 / §4-1 SKIP 理由欄を `reason` に統一・`flaky` を `build-test` の `flaky_tests` / `tests_total` に置き換え・承認後の `APPROVED` 行の決まり / §4-2 を様式の単一ソースに・severity は基盤の語彙に従う / §5 変更失敗率の分子を分母と同じ集合に(別出し)・不安定率をテスト本数単位に。`qa-metrics.mjs` と自己テスト(38 件)も同時に改訂し、変異 6 本(境界 `>=`・status 絞り込み外し・分子の突き合わせ外し・矛盾の無視・不安定率の分母拡大・メニュー外 id の流し込み)が全部赤になることを確かめた。
+- 2026-10-27: 定期タスク `yosage-quarterly-qa-review`(2・5・8・11 月の 5 日 10:45・法務チェックと同日・0円)を新設して §1 の起動元に。初回の見直しを 2026-11-05 に前倒しし、§2-1 の注と例(JSON)の日付も揃えた。
