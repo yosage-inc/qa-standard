@@ -56,6 +56,7 @@ QA の重さは **レベル(変更の大きさ・危険度)× フェーズ(事�
 | `design-table-check` | 手順書が設計表(1-3)から出ているかの照合 | S2+/M2+ | 同 | 同 | 所見 |
 | `mobile-conditions` | モバイル固有条件(1-2) | M2+: 変更に関係する行だけ | M2+: 全行 | 同 | 所見→昇格 |
 | `fixed-ui-tests` | 固定化した UI テストの実行(1-5。XCUITest / Playwright) | あれば M1+/S1+ | 必須 M1+/S1+ | 同 | FAIL 可 |
+| `design-check` | デザイン検査(SaaS のみ。デザインシステムのキット `~/yosage-saas/design-system/checks/run.mjs` 7 本を画面ごとに。基本項目) | S1+ | 同 | 同 | コントラスト・字・タップの 3 本は FAIL 可、直書き・カタログ掲載・用字・配布の 4 本は所見→昇格(2026-10-30 導入) |
 | `a11y-web` | 客側画面の axe 自動検査(2-6) | — | S2+: 所見 | S2+: 昇格後 FAIL 可 | 所見 |
 | `api-fuzz` | API 仕様駆動ファジング(2-3)。**ローカル/ステージングのみ** | スキーマが入ったら S3 のみ | S2+ | S2+ | 所見→昇格 |
 | `dual-judge` | 独立 2 系統判定(4-2)。テナント分離・保存データ保護の 2 領域だけ | — | S3/M3 | S3/M3 | 差し戻し条件 |
@@ -166,3 +167,4 @@ node ~/qa-standard/scripts/qa-menu.mjs --menu ~/yosage-webqa/qa-menu.json \
 ## 10. 改訂
 
 - 2026-10-20 制定。初回の訓練(基準値)と試走で手順が動くことを確かめてから常用する。
+- 2026-10-30 §2 に `design-check`(SaaS の基本項目・S1+)を追加。検査器の正本はデザインシステムのキット、webqa は `scripts/design_check.mjs` で呼ぶだけ(依頼書 `~/yosage-saas/design-system/briefs/2026-10-27-依頼書-webqa組み込み.md`・2026-10-27 レン決定)。

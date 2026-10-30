@@ -464,6 +464,30 @@ test("B8 基本項目はフェーズで減らない。test-diff-review(S1+)と m
   assert.deepEqual(s0.items.filter((x) => x.kind === "base").map((x) => x.id), ["static-checks", "build-test"]);
 });
 
+test("B16 design-check(デザイン検査)は webqa の基本項目で S1+・status=fail・全フェーズにあり S0 と proto には無い(2026-10-30 依頼書 webqa組み込み)", { skip: skipWeb }, () => {
+  const menu = loadMenu(WEB);
+  for (const phase of ["build", "launch", "scale"]) {
+    for (const level of ["S1", "S2", "S3"]) {
+      const it = find(buildMenu(menu, { level, phase, traits: [] }), "design-check");
+      assert.ok(it, `${level}/${phase} に design-check が無い`);
+      assert.equal(it.kind, "base");
+      assert.equal(it.status, "fail");
+      assert.equal(it.doc, "qa-levels.md#S1");
+    }
+  }
+  assert.ok(!find(buildMenu(menu, { level: "S0", phase: "launch", traits: [] }), "design-check"), "S0(資材のみ)には無い");
+  assert.equal(buildMenu(menu, { level: "S2", phase: "proto", traits: [] }).items.length, 0, "proto は対象外");
+  const it = find(buildMenu(menu, { level: "S1", phase: "build", traits: [] }), "design-check");
+  // 必須 3 本と所見 4 本の仕分けが note に書いてある(実行係はメニュー出力だけ読む)
+  assert.match(it.note, /check-contrast \/ check-font-size \/ check-tap-size/);
+  assert.match(it.note, /check-no-hardcode \/ check-catalog-coverage \/ check-ja-text \/ check-sync-drift の赤は所見/);
+  assert.match(it.note, /no_design_check/);
+  assert.match(it.evidence, /design_check\.mjs/);
+  // 並び: 基本項目の中で test-diff-review の直後(S1 の基本項目の最後)
+  const base = buildMenu(menu, { level: "S1", phase: "build", traits: [] }).items.filter((x) => x.kind === "base").map((x) => x.id);
+  assert.deepEqual(base, ["static-checks", "build-test", "smoke", "test-diff-review", "design-check"]);
+});
+
 test("B9 S0/M0(資材のみ)の条件付き項目は escaped-ledger(記録)だけ。launch pii でも同じ", { skip: skipWeb || skipApp }, () => {
   const web = buildMenu(loadMenu(WEB), { level: "S0", phase: "launch", traits: ["pii", "tenant"] });
   assert.deepEqual(condIds(web), ["escaped-ledger"]);
