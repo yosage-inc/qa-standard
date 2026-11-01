@@ -452,6 +452,14 @@ X-Frame-Options: DENY                              # CSP frame-ancestors の後�
   reusable workflow の実行分数は**呼び出し元リポジトリに課金される**ため、サイトを増やすほど
   合計消費は増える(qa-standard 側には集約されない)
   ([GitHub Docs](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations))。
+- 成果物の保存枠(2026-10-20 レン決定): Actions の成果物は容量でなく**組織全体の月累計GB時間**で数える
+  (billing usage API の sku=Actions storage。無料枠は 0.5GB × その月の時間数=9月 360・10月 372)。
+  2026-10 は 1〜13日(UTC)の累計が 372.2 で上限に達し(kazoeru 186.2・portal-sauna 91.0・reform-soba 57.7・tosou-soba 37.3)、
+  10/14 以降は全サイトの CI が `Upload build output` の `Artifact storage quota has been hit` で止まった
+  (11/1 に枠が戻って再開。2026-09 も 361.9 で寸前だった)。
+  対策: `build-output` は e2e-quality に渡すだけ(各サイトの deploy はビルドし直す)なので保持を3日→1日、
+  `qa-reports` は毎回7日→失敗時だけ1日(`continue-on-error: true` で、保存枠が尽きていても検査の合否を変えない)。
+  失敗した e2e-quality の再実行は1日以内に。過ぎると `build-output` が切れているので全ジョブをやり直す。
 
 ## 6. この標準の改訂
 

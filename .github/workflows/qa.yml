@@ -245,7 +245,9 @@ jobs:
         with:
           name: build-output
           path: ${{ inputs.working_directory }}/${{ inputs.build_output_dir }}
-          retention-days: 3
+          # 2026-10-20: 成果物の保存枠は組織全体の月累計GB時間。10/13に上限到達で全サイトのデプロイが停止したため短縮。
+          # build-output は e2e-quality に渡すだけ(各サイトの deploy はビルドし直す)なので1日で足りる
+          retention-days: 1
 
   # ---------- 3. E2E スモーク + リンク切れ + Lighthouse (L2+) ----------
   e2e-quality:
@@ -303,15 +305,18 @@ jobs:
           IFS=',' read -ra PATHS <<< "$SMOKE_PATHS"
           for p in "${PATHS[@]}"; do urls+=("--collect.url=http://localhost:8788${p}"); done
           npx lhci autorun "${urls[@]}" --config=config/lighthouserc.json
+      # 2026-10-20: 保存枠の対策(Upload build output のコメント参照)。qa-reports は失敗時だけ1日。
+      # continue-on-error: 保存枠が尽きていても検査の合否そのものを変えない
       - name: Upload QA reports (Playwright / Lighthouse)
-        if: always()
+        if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: qa-reports
           path: |
             playwright-report
             .lighthouseci/reports
-          retention-days: 7
+          retention-days: 1
           if-no-files-found: ignore
 
   # ---------- 4. セキュリティ深掘り: SAST + 依存脆弱性 (L3) ----------
