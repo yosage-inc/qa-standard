@@ -34,6 +34,7 @@ jobs:
       build_command: npm run build
       build_output_dir: dist
       smoke_paths: "/,/login"            # ← 主要ページに合わせて変更
+      # lighthouse: false                # ← noindex の管理画面(βまで検索に載せない SaaS)は Lighthouse だけ外す(E2E・リンク切れは走る)
       level_override: ${{ github.event.inputs.level_override || '' }}
       deployed_ref: qa-deployed
 

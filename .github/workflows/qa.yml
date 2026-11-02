@@ -6,7 +6,7 @@
 # レベルと実行内容:
 #   L0 コンテンツのみ    → シークレットスキャンのみ (判定ジョブの中で実行。約1分)
 #   L1 軽微なコード変更  → + lint / unit / build
-#   L2 標準リリース      → + E2Eスモーク / リンク切れ / Lighthouse
+#   L2 標準リリース      → + E2Eスモーク / リンク切れ / Lighthouse (Lighthouse は入力 lighthouse: false で外せる)
 #   L3 セキュリティ敏感  → + SAST / 依存脆弱性 (+ 人の承認ゲートは l3_approval: true のときだけ)
 #
 # Actions の分数: 課金はジョブごとに1分単位で切り上げられる。数秒で終わる検査は独立したジョブにせず、
@@ -76,6 +76,15 @@ on:
           required reviewers を設定できる環境(公開リポジトリ・Enterprise)で true にする
         required: false
         default: false
+        type: boolean
+      lighthouse:
+        description: >-
+          e2e-quality の Lighthouse CI(性能・アクセシビリティ・SEO の採点。config/lighthouserc.json)を実行するか。
+          検索に載せない(noindex)・ログインの後ろにある SaaS の管理画面は SEO / is-crawlable を設計上満たせないので
+          false で外す(2026-11-02 レン決定。初出はみんなの台帳)。外したサイトのアクセシビリティは webqa の
+          design-check(デザイン検査)で見る。E2E スモークとリンク切れは変わらず走る。既定 true(メディアサイトは外さない)
+        required: false
+        default: true
         type: boolean
       qa_standard_ref:
         required: false
@@ -181,6 +190,7 @@ jobs:
           REASON: ${{ steps.run.outputs.reason }}
           DEPLOYED_REF: ${{ inputs.deployed_ref }}
           L3_APPROVAL: ${{ inputs.l3_approval }}
+          LIGHTHOUSE: ${{ inputs.lighthouse }}
         run: |
           {
             echo "## QA レベル: $LEVEL"
@@ -190,6 +200,9 @@ jobs:
             fi
             if [ "$LEVEL" = "L3" ] && [ "$L3_APPROVAL" != "true" ]; then
               echo "- 人の承認ゲート: 使わない設定(入力 \`l3_approval\`)。GitHub Free / Pro / Team の private リポジトリでは required reviewers を設定できないため"
+            fi
+            if [ "$LIGHTHOUSE" != "true" ]; then
+              echo "- Lighthouse: 外す設定(入力 \`lighthouse: false\`。noindex の管理画面は SEO / is-crawlable を満たせないため)。E2E スモーク・リンク切れは走る"
             fi
             echo "- 上書きしたい場合: コミットメッセージに \`[qa:L0]\`〜\`[qa:L3]\`、または workflow_dispatch の level_override"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -296,7 +309,9 @@ jobs:
             --remap '(file://.*/site-dist(?:/[^#./]+)*)#(.*) $1/index.html#$2'
             "site-dist/**/*.html"
           fail: true
+      # 入力 lighthouse: false のサイト(noindex の SaaS 管理画面)はこの段だけ飛ばす(2026-11-02)。E2E・リンク切れは上で済んでいる
       - name: Lighthouse CI (smoke_paths のページのみ)
+        if: inputs.lighthouse
         env:
           SMOKE_PATHS: ${{ inputs.smoke_paths }}
         run: |

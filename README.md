@@ -15,7 +15,7 @@ push / PR
    │
    ├─ L0 コンテンツのみ(記事・データ・画像) → シークレットスキャンのみ(約1分)
    ├─ L1 軽微なコード変更(≤5ファイル/150行) → + lint / unit / build
-   ├─ L2 標準リリース(レイアウト・大規模変更) → + E2Eスモーク / リンク切れ / Lighthouse
+   ├─ L2 標準リリース(レイアウト・大規模変更) → + E2Eスモーク / リンク切れ / Lighthouse(noindex の SaaS 管理画面は入力 lighthouse: false で Lighthouse だけ外す)
    └─ L3 セキュリティ敏感(認証・決済・DB・依存) → + SAST / 依存脆弱性(🙋レン承認は l3_approval: true のときだけ)
    │
    ▼
