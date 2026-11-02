@@ -1,0 +1,7 @@
+# lychee(リンク切れ検査)の除外。1 行 1 正規表現(URL に対して)。qa.yml の e2e-quality(--offline で dist を検査)と
+# security-weekly の両方がこのディレクトリで lychee を走らせるので、ここに置く(qa-policy.md §3-5)。
+#
+# contact-hub の送信先 /api/contact: 各サイトの Worker が Service Binding で転送する経路で、静的ファイルではない。
+# 静的 HTML のフォーム action="/api/contact"(JS 無しでも入力が URL に載らないための POST 先。Anabastay 2026-11-02)を
+# --offline の dist 検査が「ファイルが無い」と誤検知するのを止める。
+/api/contact$
