@@ -108,6 +108,7 @@ private リポジトリの Actions は月2,000分まで無料で、yosage-inc �
 | `docs/qa-profile-standard.md` | **QAプロファイル基準**(SaaS・モバイル共通。レベル×フェーズ×特性で「必要最低限」のメニューを決める過剰品質ガード・昇格降格・本番保護。2026-10-20) |
 | `scripts/qa-menu.mjs` / `qa-menu.test.mjs` | メニュー生成器(基盤ごとの `qa-menu.json` を読み、その回の検査項目と時間上限を出す。`npm test` に自己テスト) |
 | `scripts/qa-metrics.mjs` / `qa-metrics.test.mjs` | QA 台帳の指標集計(欠陥検出率・変更失敗率・不安定率・項目ごとの所要と検出。四半期の見直し用) |
+| `scripts/vuln-exceptions.mjs` / `vuln-exceptions.test.mjs` | 修正版のない脆弱性の期限つき例外(台帳 `config/vuln-exceptions.json`)を security-deep と週次スキャンの OSV-Scanner・npm audit に効かせる。2026-11-18 レン決定・docs/qa-policy.md §4-7 |
 | `docs/qa-quarterly-review.md` | 四半期の QA の重さの見直し手順(昇格・降格・頻度の変更)。定期タスク `yosage-quarterly-qa-review`(2/5/8/11 月 5 日 10:45・初回 2026-11-05)が実行 |
 | `docs/seeded-defect-drill.md` / `scripts/drill-guard-pre-push.sh` | 欠陥埋め込み訓練(QA 自身の検出率を測る)の手順と、訓練の枝を push させない pre-push フック |
 

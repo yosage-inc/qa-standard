@@ -342,6 +342,25 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # 修正版のない脆弱性の期限つき例外(2026-11-18 レン決定・docs/qa-policy.md §4-7)。台帳は qa-standard の
+      # config/vuln-exceptions.json の1か所。道具と台帳だけを $RUNNER_TEMP に写し、基盤のコードはサイトの検査に混ぜない
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ github.repository_owner }}/qa-standard
+          ref: ${{ inputs.qa_standard_ref }}
+          path: .qa-standard
+      - name: 脆弱性の例外台帳を読む
+        # 台帳が不正なら終了コード 2 でここで落ちる(例外は1件も通さない)。修正版が出た行・確認に失敗した行は適用しない
+        # (後ろの OSV-Scanner と npm audit がそのまま落ちる=安全側)。OSV-Scanner は Docker で動き作業ディレクトリしか
+        # 見えないので、設定は作業ディレクトリ直下に書く
+        run: |
+          mkdir -p "$RUNNER_TEMP/qa-vuln"
+          cp .qa-standard/scripts/vuln-exceptions.mjs .qa-standard/config/vuln-exceptions.json "$RUNNER_TEMP/qa-vuln/"
+          rm -rf .qa-standard
+          node "$RUNNER_TEMP/qa-vuln/vuln-exceptions.mjs" prepare \
+            --ledger "$RUNNER_TEMP/qa-vuln/vuln-exceptions.json" \
+            --osv-config ./.qa-osv-scanner.toml \
+            --active-out "$RUNNER_TEMP/qa-vuln/active.json"
       # 公式推奨のコンテナ実行 (旧 semgrep-action は 2024-04 に deprecated)。Platform未登録の完全無料運用
       - name: Semgrep SAST (Community Edition)
         run: |
@@ -350,13 +369,20 @@ jobs:
       - name: OSV-Scanner (依存脆弱性)
         uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
         with:
-          scan-args: --recursive ./
+          # --config は例外台帳から書いた設定。サイト側に osv-scanner.toml があってもこれで上書きされる
+          scan-args: --config ./.qa-osv-scanner.toml --recursive ./
         continue-on-error: false
       - name: npm audit (high 以上)
         if: inputs.runtime == 'node'
         working-directory: ${{ inputs.working_directory }}
+        # 合否は npm audit --audit-level=high と同じ線。通すのは例外台帳で適用中の high だけ(critical は通さない)
         run: |
-          if [ -f package-lock.json ]; then npm audit --audit-level=high; else echo "lockfile なしのためスキップ"; fi
+          if [ -f package-lock.json ]; then
+            npm audit --json > "$RUNNER_TEMP/qa-vuln/npm-audit.json" || true
+            node "$RUNNER_TEMP/qa-vuln/vuln-exceptions.mjs" npm-audit \
+              --input "$RUNNER_TEMP/qa-vuln/npm-audit.json" \
+              --active "$RUNNER_TEMP/qa-vuln/active.json"
+          else echo "lockfile なしのためスキップ"; fi
 
   # ---------- 5. L3 承認ゲート (レンの手動承認。l3_approval: true のときだけ) ----------
   # GitHub Free / Pro / Team の private リポジトリでは environment の required reviewers を設定できない

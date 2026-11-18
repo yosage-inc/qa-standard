@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "max_days": 30,
+  "exceptions": [
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "aliases": ["CVE-2026-112366"],
+      "ecosystem": "npm",
+      "package": "picomatch",
+      "summary": "picomatch 4.0.7 以下の ReDoS(1分岐の繰り返し extglob)。修正版なし",
+      "reason": "astro・vite・tinyglobby・unstorage 経由のビルド用の部品。攻撃には攻撃者が glob の文字列を渡せることが要るが、当社サイトは自分の設定にある glob だけをビルド時に使い、公開物(静的ファイルと Worker)には picomatch が入らない",
+      "approved_by": "レン",
+      "approved_on": "2026-11-18",
+      "expires": "2026-12-18"
+    }
+  ]
+}

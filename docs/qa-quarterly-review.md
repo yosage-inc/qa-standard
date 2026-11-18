@@ -37,6 +37,7 @@ node scripts/qa-metrics.mjs --ledger ~/yosage-appqa/ledger --menu ~/yosage-appqa
 - 出力はそのまま `ledger/reports/YYYY-MM-DD-quarterly-metrics.md` に保存する(基盤ごと。非公開の台帳側に置く。`qa-standard` は公開リポジトリなので数字を置かない)。
 - 出力の末尾「欠損・注意」を先に読む。**旧様式の行・読めない行・escaped に無い欄・qa-log に無い release_commit・記録の矛盾(false_alarms > findings)・変更失敗率に入れなかった漏れ** は落とさず件数が出る。件数が多いなら、まずそこ(記録の抜け)を直すのがこの日の仕事。
 - **`ledger/drills.jsonl`(欠陥埋め込み訓練の台帳。`seeded-defect-drill.md` §9-2)も基盤ごとに読む**。`qa-metrics.mjs` は読まないので人が見る: 訓練の DDP(`found ÷ seeded`)・`missed_types`(落ちた型)・`cleanup_verified` が `false` の行(後始末が未確認=枝が残っている可能性。先に `seeded-defect-drill.md` §10 の確認をする)。訓練は見直しの前に回しておく(`seeded-defect-drill.md`)。台帳が無い・行が無いなら「訓練の記録なし」と報告に書く(黙って落とさない)。
+- **脆弱性の例外台帳の棚卸し**(`config/vuln-exceptions.json`・`qa-policy.md` §4-7): 期限切れの行を消し、まだ要る行は延長の再承認をレンに取る(承認後に `approved_on` と `expires` を更新して `npm test`)。
 
 ### 2-2. 候補を確かめる(機械の提案を鵜呑みにしない)
 

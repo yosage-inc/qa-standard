@@ -1,0 +1,278 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "@astrojs/check": {
+      "name": "@astrojs/check",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@astrojs/language-server"
+      ],
+      "effects": [],
+      "range": ">=0.9.8",
+      "nodes": [
+        "node_modules/@astrojs/check"
+      ],
+      "fixAvailable": true
+    },
+    "@astrojs/internal-helpers": {
+      "name": "@astrojs/internal-helpers",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "picomatch"
+      ],
+      "effects": [
+        "@astrojs/markdown-satteri",
+        "@astrojs/vite-plugin-astro",
+        "astro"
+      ],
+      "range": ">=0.8.0-beta.0",
+      "nodes": [
+        "node_modules/@astrojs/internal-helpers"
+      ],
+      "fixAvailable": {
+        "name": "astro",
+        "version": "5.3.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@astrojs/language-server": {
+      "name": "@astrojs/language-server",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "tinyglobby"
+      ],
+      "effects": [
+        "@astrojs/check"
+      ],
+      "range": "2.16.1-alpha.0 - 2.16.1-beta.1 || >=2.16.3",
+      "nodes": [
+        "node_modules/@astrojs/language-server"
+      ],
+      "fixAvailable": true
+    },
+    "@astrojs/markdown-satteri": {
+      "name": "@astrojs/markdown-satteri",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@astrojs/internal-helpers"
+      ],
+      "effects": [
+        "astro"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@astrojs/markdown-satteri"
+      ],
+      "fixAvailable": {
+        "name": "astro",
+        "version": "5.3.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@astrojs/vite-plugin-astro": {
+      "name": "@astrojs/vite-plugin-astro",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@astrojs/internal-helpers",
+        "vite"
+      ],
+      "effects": [
+        "astro"
+      ],
+      "range": ">=0.1.0",
+      "nodes": [
+        "node_modules/@astrojs/vite-plugin-astro"
+      ],
+      "fixAvailable": {
+        "name": "astro",
+        "version": "5.3.0",
+        "isSemVerMajor": true
+      }
+    },
+    "anymatch": {
+      "name": "anymatch",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "picomatch"
+      ],
+      "effects": [
+        "unstorage"
+      ],
+      "range": ">=3.0.0",
+      "nodes": [
+        "node_modules/anymatch"
+      ],
+      "fixAvailable": {
+        "name": "astro",
+        "version": "5.3.0",
+        "isSemVerMajor": true
+      }
+    },
+    "astro": {
+      "name": "astro",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@astrojs/internal-helpers",
+        "@astrojs/markdown-satteri",
+        "@astrojs/vite-plugin-astro",
+        "picomatch",
+        "tinyglobby",
+        "unstorage",
+        "vite"
+      ],
+      "effects": [],
+      "range": "<=0.0.0-xray-20231129021231 || 0.0.6 - 0.0.12 || 0.10.0 - 0.20.12 || >=5.1.0",
+      "nodes": [
+        "node_modules/astro"
+      ],
+      "fixAvailable": {
+        "name": "astro",
+        "version": "5.3.0",
+        "isSemVerMajor": true
+      }
+    },
+    "fdir": {
+      "name": "fdir",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "picomatch"
+      ],
+      "effects": [],
+      "range": ">=5.2.1",
+      "nodes": [
+        "node_modules/fdir"
+      ],
+      "fixAvailable": true
+    },
+    "picomatch": {
+      "name": "picomatch",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1247710,
+          "name": "picomatch",
+          "dependency": "picomatch",
+          "title": "picomatch vulnerable to ReDoS through single-branch repeated extglobs",
+          "url": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<=4.0.7"
+        }
+      ],
+      "effects": [
+        "@astrojs/internal-helpers",
+        "anymatch",
+        "astro",
+        "fdir",
+        "tinyglobby",
+        "vite"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/anymatch/node_modules/picomatch",
+        "node_modules/picomatch"
+      ],
+      "fixAvailable": {
+        "name": "astro",
+        "version": "5.3.0",
+        "isSemVerMajor": true
+      }
+    },
+    "tinyglobby": {
+      "name": "tinyglobby",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "fdir",
+        "picomatch"
+      ],
+      "effects": [
+        "@astrojs/language-server",
+        "astro"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/tinyglobby"
+      ],
+      "fixAvailable": {
+        "name": "astro",
+        "version": "5.3.0",
+        "isSemVerMajor": true
+      }
+    },
+    "unstorage": {
+      "name": "unstorage",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "anymatch"
+      ],
+      "effects": [
+        "astro"
+      ],
+      "range": "0.0.3 - 1.17.6",
+      "nodes": [
+        "node_modules/unstorage"
+      ],
+      "fixAvailable": {
+        "name": "astro",
+        "version": "5.3.0",
+        "isSemVerMajor": true
+      }
+    },
+    "vite": {
+      "name": "vite",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "picomatch",
+        "tinyglobby"
+      ],
+      "effects": [
+        "astro"
+      ],
+      "range": ">=6.3.0-beta.0",
+      "nodes": [
+        "node_modules/vite"
+      ],
+      "fixAvailable": {
+        "name": "astro",
+        "version": "5.3.0",
+        "isSemVerMajor": true
+      }
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 12,
+      "critical": 0,
+      "total": 12
+    },
+    "dependencies": {
+      "prod": 192,
+      "dev": 107,
+      "optional": 115,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 408
+    }
+  }
+}
